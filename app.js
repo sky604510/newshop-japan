@@ -32,7 +32,7 @@ function friendlyError(error) {
   if (/user already registered/i.test(message)) return '這個信箱已經註冊';
   if (/email not confirmed/i.test(message)) return '請先到信箱完成驗證';
   if (/insufficient_stock/i.test(message)) return `商品庫存不足：${message.split(':').slice(1).join(':').trim()}`;
-  if (/product_not_available/i.test(message)) return '部分商品已下架，請重新整理購物袋';
+  if (/product_not_available/i.test(message)) return '部分商品已下架，請重新整理購物車';
   if (/login_required/i.test(message)) return '請先登入會員';
   return message;
 }
@@ -101,19 +101,19 @@ supabase.auth.onAuthStateChange((event, session) => window.setTimeout(() => {
 function nav() {
   const admin = isManager() ? `<button class="${state.view === 'admin' ? 'active' : ''}" data-view="admin">${state.profile?.role === 'owner' ? '所有者後台' : '店主後台'}</button>` : '';
   const member = state.user ? esc(state.user.email || '會員') : '登入';
-  return `<header class="nav"><button class="brand" data-view="shop"><span class="mark">✦</span><span>NewShop日本連線代購<small style="display:block;color:var(--muted);font-weight:500;font-size:10px;letter-spacing:.18em">JAPAN SELECT SHOP</small></span></button><nav class="navlinks"><button class="${state.view === 'shop' ? 'active' : ''}" data-view="shop">買東西</button><button data-scroll="guide">購物須知</button><button class="${state.view === 'orders' ? 'active' : ''}" data-view="orders">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物袋 <span class="badge">${cartCount()}</span></button></nav></header>`;
+  return `<header class="nav"><button class="brand" data-view="shop"><span class="mark">✦</span><span>NewShop日本連線代購<small style="display:block;color:var(--muted);font-weight:500;font-size:10px;letter-spacing:.18em">JAPAN SELECT SHOP</small></span></button><nav class="navlinks"><button class="${state.view === 'shop' ? 'active' : ''}" data-view="shop">買東西</button><button data-scroll="guide">購物須知</button><button class="${state.view === 'orders' ? 'active' : ''}" data-view="orders">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物車 <span class="badge">${cartCount()}</span></button></nav></header>`;
 }
 
 function productCard(product) {
   const soldOut = Number(product.stock) <= 0;
   const art = product.image_url ? `<img src="${esc(product.image_url)}" alt="${esc(product.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:14px" />` : esc(product.emoji);
-  return `<article class="product"><div class="product-art"><span class="product-tag">${soldOut ? '目前售完' : `剩餘 ${product.stock} 件`}</span>${art}</div><div class="product-info"><h3>${esc(product.name)}</h3><p>${esc(product.description)}</p><div class="product-bottom"><span class="price">${money(product.price)}</span><button class="btn btn-accent" data-add="${product.id}" ${soldOut ? 'disabled' : ''}>${soldOut ? '已售完' : '加入購物袋'}</button></div></div></article>`;
+  return `<article class="product"><div class="product-art"><span class="product-tag">${soldOut ? '目前售完' : `剩餘 ${product.stock} 件`}</span>${art}</div><div class="product-info"><h3>${esc(product.name || '未命名商品')}</h3><p>${esc(product.description || '暫無商品說明')}</p><div class="product-bottom"><span class="price">${money(product.price)}</span><button class="btn btn-accent" data-add="${product.id}" ${soldOut ? 'disabled' : ''}>${soldOut ? '已售完' : '加入購物車'}</button></div></div></article>`;
 }
 
 function shop() {
   const activeProducts = state.products.filter((product) => product.is_active);
   const products = state.loading ? `<div class="empty" style="grid-column:1/-1">正在同步日本連線商品…</div>` : activeProducts.length ? activeProducts.map(productCard).join('') : `<div class="empty" style="grid-column:1/-1">目前沒有上架商品</div>`;
-  return `<main><section class="hero"><div class="hero-copy"><span class="eyebrow">日本連線・少量代購</span><h1>把日本的<br/><em style="color:var(--coral)">喜歡帶回來。</em></h1><p>NewShop 精選日本限定商品。登入會員、加入購物袋並送出訂單，我們會在確認採購後通知你。</p><button class="btn btn-primary" data-scroll="products">開始選購 ↓</button></div><div class="hero-card"><span class="card-label">NEW FROM JAPAN / 01</span><div class="card-copy"><h2>日本連線選物</h2><p style="opacity:.8;line-height:1.7">限量零食、藥妝與生活雜貨，每批連線都會更新。</p><button class="btn btn-light" data-scroll="products">查看本期商品</button></div></div></section><section id="products"><div class="section-head"><div><h2>本期連線商品</h2><p>價格與庫存由店主即時更新。</p></div><span class="eyebrow">LIVE FROM SUPABASE</span></div><div class="products">${products}</div></section><section id="guide" class="guide"><div class="section-head"><div><span class="eyebrow">HOW TO ORDER</span><h2 style="margin-top:10px">購物流程</h2></div><p>簡單三步驟，完成日本連線預訂。</p></div><div class="guide-grid"><article><span>01</span><h3>選擇商品</h3><p>將想要的商品加入購物袋，可直接調整數量。</p></article><article><span>02</span><h3>登入送單</h3><p>填寫收件人、電話與取貨方式，必要需求可寫在備註。</p></article><article><span>03</span><h3>店主確認</h3><p>訂單送出後可隨時查詢，付款與取貨資訊由店主確認。</p></article></div><div class="notice"><div><h3>購買前請注意</h3><p>連線代購商品的價格、庫存與到貨時間，以店主最後確認為準。商品規格或其他需求，請在訂單備註說明。</p></div><a class="btn btn-light" href="mailto:sky604510@gmail.com">聯絡 NewShop</a></div></section></main>`;
+  return `<main><section class="hero"><div class="hero-copy"><span class="eyebrow">日本連線・少量代購</span><h1>把日本的<br/><em style="color:var(--coral)">喜歡帶回來。</em></h1><p>NewShop 精選日本限定商品。登入會員、加入購物車並送出訂單，我們會在確認採購後通知你。</p><button class="btn btn-primary" data-scroll="products">開始選購 ↓</button></div><div class="hero-card"><span class="card-label">NEW FROM JAPAN / 01</span><div class="card-copy"><h2>日本連線選物</h2><p style="opacity:.8;line-height:1.7">限量零食、藥妝與生活雜貨，每批連線都會更新。</p><button class="btn btn-light" data-scroll="products">查看本期商品</button></div></div></section><section id="products"><div class="section-head"><div><h2>本期連線商品</h2><p>價格與庫存由店主即時更新。</p></div><span class="eyebrow">LIVE FROM SUPABASE</span></div><div class="products">${products}</div></section><section id="guide" class="guide"><div class="section-head"><div><span class="eyebrow">HOW TO ORDER</span><h2 style="margin-top:10px">購物流程</h2></div><p>簡單三步驟，完成日本連線預訂。</p></div><div class="guide-grid"><article><span>01</span><h3>選擇商品</h3><p>將想要的商品加入購物車，可直接調整數量。</p></article><article><span>02</span><h3>登入送單</h3><p>填寫收件人、電話與取貨方式，必要需求可寫在備註。</p></article><article><span>03</span><h3>店主確認</h3><p>訂單送出後可隨時查詢，付款與取貨資訊由店主確認。</p></article></div><div class="notice"><div><h3>購買前請注意</h3><p>連線代購商品的價格、庫存與到貨時間，以店主最後確認為準。商品規格或其他需求，請在訂單備註說明。</p></div><a class="btn btn-light" href="mailto:sky604510@gmail.com">聯絡 NewShop</a></div></section></main>`;
 }
 
 function orderRow(order) {
@@ -138,7 +138,7 @@ function adminView() {
 function footer() { return `<footer>NewShop日本連線代購 <span style="float:right"><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a>・會員與訂單由 Supabase 安全保存</span></footer>`; }
 
 function cartModal() {
-  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">YOUR BAG</span><h2>購物袋</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="cart-line"><div><strong>${esc(item.name)}</strong><div class="cart-subtotal">${money(Number(item.price) * item.qty)}</div></div><div class="cart-controls"><button data-cart-change="${item.id}" data-delta="-1" aria-label="減少 ${esc(item.name)} 數量">−</button><strong>${item.qty}</strong><button data-cart-change="${item.id}" data-delta="1" aria-label="增加 ${esc(item.name)} 數量" ${item.qty >= item.stock ? 'disabled' : ''}>＋</button><button class="remove-link" data-remove="${item.id}">移除</button></div></div>`).join('')}<div class="cart-total"><strong>商品合計</strong><strong>${money(cartTotal())}</strong></div><p class="cart-note">最終金額、付款與取貨資訊由店主確認。</p><button class="btn btn-primary" style="width:100%" data-action="begin-checkout">前往結帳</button>` : `<div class="empty">購物袋還是空的</div>`}</div></div>`;
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">YOUR CART</span><h2>購物車</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="cart-line"><div><strong>${esc(item.name)}</strong><div class="cart-subtotal">${money(Number(item.price) * item.qty)}</div></div><div class="cart-controls"><button data-cart-change="${item.id}" data-delta="-1" aria-label="減少 ${esc(item.name)} 數量">−</button><strong>${item.qty}</strong><button data-cart-change="${item.id}" data-delta="1" aria-label="增加 ${esc(item.name)} 數量" ${item.qty >= item.stock ? 'disabled' : ''}>＋</button><button class="remove-link" data-remove="${item.id}">移除</button></div></div>`).join('')}<div class="cart-total"><strong>商品合計</strong><strong>${money(cartTotal())}</strong></div><p class="cart-note">最終金額、付款與取貨資訊由店主確認。</p><button class="btn btn-primary" style="width:100%" data-action="begin-checkout">前往結帳</button>` : `<div class="empty">購物車還是空的</div>`}</div></div>`;
 }
 
 function authModal() {
@@ -192,7 +192,7 @@ function addToCart(id) {
   if (item && item.qty >= product.stock) { renderToast('已達目前可購買庫存'); return; }
   if (item) item.qty += 1;
   else state.cart.push({ id: product.id, name: product.name, price: Number(product.price), qty: 1, stock: product.stock });
-  saveCart(); renderToast(`${product.name} 已加入購物袋`);
+  saveCart(); renderToast(`${product.name} 已加入購物車`);
 }
 
 function changeCartQuantity(id, delta) {
