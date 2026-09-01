@@ -10,7 +10,7 @@ const statusLabels = { pending: '待確認', confirmed: '已確認', preparing: 
 const managerRoles = new Set(['admin', 'owner']);
 const state = {
   view: 'shop', cart: JSON.parse(localStorage.getItem('newshop_cart') || '[]'),
-  user: null, profile: null, products: [], orders: [], modal: null,
+  user: null, profile: null, products: [], orders: [], modal: null, lastOrder: null,
   authMode: 'login', loading: true, busy: false, toast: '', editingProductId: null,
 };
 
@@ -101,7 +101,7 @@ supabase.auth.onAuthStateChange((event, session) => window.setTimeout(() => {
 function nav() {
   const admin = isManager() ? `<button class="${state.view === 'admin' ? 'active' : ''}" data-view="admin">${state.profile?.role === 'owner' ? '所有者後台' : '店主後台'}</button>` : '';
   const member = state.user ? esc(state.user.email || '會員') : '登入';
-  return `<header class="nav"><button class="brand" data-view="shop"><span class="mark">✦</span><span>NewShop日本連線代購<small style="display:block;color:var(--muted);font-weight:500;font-size:10px;letter-spacing:.18em">JAPAN SELECT SHOP</small></span></button><nav class="navlinks"><button class="${state.view === 'shop' ? 'active' : ''}" data-view="shop">買東西</button><button class="${state.view === 'orders' ? 'active' : ''}" data-view="orders">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物袋 <span class="badge">${cartCount()}</span></button></nav></header>`;
+  return `<header class="nav"><button class="brand" data-view="shop"><span class="mark">✦</span><span>NewShop日本連線代購<small style="display:block;color:var(--muted);font-weight:500;font-size:10px;letter-spacing:.18em">JAPAN SELECT SHOP</small></span></button><nav class="navlinks"><button class="${state.view === 'shop' ? 'active' : ''}" data-view="shop">買東西</button><button data-scroll="guide">購物須知</button><button class="${state.view === 'orders' ? 'active' : ''}" data-view="orders">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物袋 <span class="badge">${cartCount()}</span></button></nav></header>`;
 }
 
 function productCard(product) {
@@ -113,7 +113,7 @@ function productCard(product) {
 function shop() {
   const activeProducts = state.products.filter((product) => product.is_active);
   const products = state.loading ? `<div class="empty" style="grid-column:1/-1">正在同步日本連線商品…</div>` : activeProducts.length ? activeProducts.map(productCard).join('') : `<div class="empty" style="grid-column:1/-1">目前沒有上架商品</div>`;
-  return `<main><section class="hero"><div class="hero-copy"><span class="eyebrow">日本連線・少量代購</span><h1>把日本的<br/><em style="color:var(--coral)">喜歡帶回來。</em></h1><p>NewShop 精選日本限定商品。登入會員、加入購物袋並送出訂單，我們會在確認採購後通知你。</p><button class="btn btn-primary" data-scroll="products">開始選購 ↓</button></div><div class="hero-card"><span class="card-label">NEW FROM JAPAN / 01</span><div class="card-copy"><h2>日本連線選物</h2><p style="opacity:.8;line-height:1.7">限量零食、藥妝與生活雜貨，每批連線都會更新。</p><button class="btn btn-light" data-scroll="products">查看本期商品</button></div></div></section><section id="products"><div class="section-head"><div><h2>本期連線商品</h2><p>價格與庫存由店主即時更新。</p></div><span class="eyebrow">LIVE FROM SUPABASE</span></div><div class="products">${products}</div></section></main>`;
+  return `<main><section class="hero"><div class="hero-copy"><span class="eyebrow">日本連線・少量代購</span><h1>把日本的<br/><em style="color:var(--coral)">喜歡帶回來。</em></h1><p>NewShop 精選日本限定商品。登入會員、加入購物袋並送出訂單，我們會在確認採購後通知你。</p><button class="btn btn-primary" data-scroll="products">開始選購 ↓</button></div><div class="hero-card"><span class="card-label">NEW FROM JAPAN / 01</span><div class="card-copy"><h2>日本連線選物</h2><p style="opacity:.8;line-height:1.7">限量零食、藥妝與生活雜貨，每批連線都會更新。</p><button class="btn btn-light" data-scroll="products">查看本期商品</button></div></div></section><section id="products"><div class="section-head"><div><h2>本期連線商品</h2><p>價格與庫存由店主即時更新。</p></div><span class="eyebrow">LIVE FROM SUPABASE</span></div><div class="products">${products}</div></section><section id="guide" class="guide"><div class="section-head"><div><span class="eyebrow">HOW TO ORDER</span><h2 style="margin-top:10px">購物流程</h2></div><p>簡單三步驟，完成日本連線預訂。</p></div><div class="guide-grid"><article><span>01</span><h3>選擇商品</h3><p>將想要的商品加入購物袋，可直接調整數量。</p></article><article><span>02</span><h3>登入送單</h3><p>填寫收件人、電話與取貨方式，必要需求可寫在備註。</p></article><article><span>03</span><h3>店主確認</h3><p>訂單送出後可隨時查詢，付款與取貨資訊由店主確認。</p></article></div><div class="notice"><div><h3>購買前請注意</h3><p>連線代購商品的價格、庫存與到貨時間，以店主最後確認為準。商品規格或其他需求，請在訂單備註說明。</p></div><a class="btn btn-light" href="mailto:sky604510@gmail.com">聯絡 NewShop</a></div></section></main>`;
 }
 
 function orderRow(order) {
@@ -135,10 +135,10 @@ function adminView() {
   return `<main class="admin-page"><section class="panel"><div class="section-head"><div><span class="eyebrow">OWNER CONSOLE</span><h2 style="margin-top:10px">訂單總覽</h2><p>${esc(state.user?.email)}・${state.profile?.role === 'owner' ? '最高所有者' : '管理員'}</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${state.orders.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>訂單編號</th><th>收件人</th><th>品項</th><th>金額</th><th>狀態</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">還沒有訂單</div>`}</section><section class="panel"><div class="section-head"><div><span class="eyebrow">PRODUCTS</span><h2 style="margin-top:10px">商品管理</h2><p>新增、修改庫存，或上架／下架商品。</p></div><button class="btn btn-accent" data-action="new-product">＋ 新增商品</button></div>${state.products.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>商品</th><th>售價</th><th>庫存</th><th>操作</th></tr></thead><tbody>${productRows}</tbody></table></div>` : `<div class="empty">尚未建立商品</div>`}</section></main>`;
 }
 
-function footer() { return `<footer>NewShop日本連線代購 <span style="float:right">會員與訂單由 Supabase 安全保存</span></footer>`; }
+function footer() { return `<footer>NewShop日本連線代購 <span style="float:right"><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a>・會員與訂單由 Supabase 安全保存</span></footer>`; }
 
 function cartModal() {
-  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">YOUR BAG</span><h2>購物袋</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="order"><div><strong>${esc(item.name)}</strong><div style="font-size:13px;color:var(--muted)">${money(item.price)} × ${item.qty}</div></div><button class="btn" data-remove="${item.id}" style="background:#f0eee6">移除</button></div>`).join('')}<div style="display:flex;justify-content:space-between;margin:20px 0;font-size:18px"><strong>合計</strong><strong>${money(cartTotal())}</strong></div><button class="btn btn-primary" style="width:100%" data-action="begin-checkout">前往結帳</button>` : `<div class="empty">購物袋還是空的</div>`}</div></div>`;
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">YOUR BAG</span><h2>購物袋</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="cart-line"><div><strong>${esc(item.name)}</strong><div class="cart-subtotal">${money(Number(item.price) * item.qty)}</div></div><div class="cart-controls"><button data-cart-change="${item.id}" data-delta="-1" aria-label="減少 ${esc(item.name)} 數量">−</button><strong>${item.qty}</strong><button data-cart-change="${item.id}" data-delta="1" aria-label="增加 ${esc(item.name)} 數量" ${item.qty >= item.stock ? 'disabled' : ''}>＋</button><button class="remove-link" data-remove="${item.id}">移除</button></div></div>`).join('')}<div class="cart-total"><strong>商品合計</strong><strong>${money(cartTotal())}</strong></div><p class="cart-note">最終金額、付款與取貨資訊由店主確認。</p><button class="btn btn-primary" style="width:100%" data-action="begin-checkout">前往結帳</button>` : `<div class="empty">購物袋還是空的</div>`}</div></div>`;
 }
 
 function authModal() {
@@ -158,6 +158,11 @@ function checkoutModal() {
   return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">CHECKOUT</span><h2>確認訂單</h2></div><button class="close" data-action="close">×</button></div><div class="field"><label>收件人</label><input id="customer" autocomplete="name" placeholder="請輸入姓名" /></div><div class="field"><label>聯絡電話</label><input id="phone" autocomplete="tel" placeholder="09xx-xxx-xxx" /></div><div class="field"><label>取貨方式</label><select id="delivery"><option>面交取貨</option><option>宅配到府</option></select></div><div class="field"><label>訂單備註</label><input id="note" placeholder="尺寸、顏色或其他需求（選填）" /></div><button class="btn btn-accent" style="width:100%" data-action="checkout" ${state.busy ? 'disabled' : ''}>${state.busy ? '送出中…' : `送出訂單・${money(cartTotal())}`}</button></div></div>`;
 }
 
+function successModal() {
+  const order = state.lastOrder;
+  return `<div class="modal-backdrop"><div class="modal success-modal"><div class="success-mark">✓</div><span class="eyebrow">ORDER RECEIVED</span><h2>訂單已成功送出</h2><p>我們會盡快確認採購內容，你可以在「我的訂單」查看進度。</p><div class="success-order"><span>訂單編號</span><strong>${esc(order?.order_number || '處理中')}</strong><span>商品金額</span><strong>${money(order?.total_amount || 0)}</strong></div><button class="btn btn-primary" style="width:100%" data-action="view-orders">查看我的訂單</button><button class="forgot-link" data-action="continue-shopping">繼續逛逛</button></div></div>`;
+}
+
 function productModal() {
   const product = state.products.find((item) => item.id === state.editingProductId);
   return `<div class="modal-backdrop"><div class="modal product-modal"><div class="modal-head"><div><span class="eyebrow">PRODUCT EDITOR</span><h2>${product ? '編輯商品' : '新增商品'}</h2></div><button class="close" data-action="close">×</button></div><div class="field"><label>商品名稱</label><input id="product-name" value="${esc(product?.name || '')}" maxlength="100" /></div><div class="field"><label>商品說明</label><textarea id="product-description" rows="3" maxlength="1000">${esc(product?.description || '')}</textarea></div><div class="form-grid"><div class="field"><label>售價（NT$）</label><input id="product-price" type="number" min="0" step="1" value="${product?.price ?? ''}" /></div><div class="field"><label>庫存</label><input id="product-stock" type="number" min="0" step="1" value="${product?.stock ?? 0}" /></div></div><div class="field"><label>商品圖片（JPG、PNG、WebP，最大 5MB）</label><input id="product-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /></div>${product?.image_url ? `<div class="image-preview"><img src="${esc(product.image_url)}" alt="目前商品圖片"/><span>沒有選新圖時，會保留這張圖。</span></div>` : ''}<label class="check-field"><input id="product-active" type="checkbox" ${product?.is_active === false ? '' : 'checked'} /> 建立後立即上架</label><button class="btn btn-primary" style="width:100%" data-action="save-product" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存商品'}</button></div></div>`;
@@ -170,6 +175,7 @@ function modal() {
   if (state.modal === 'new-password') return newPasswordModal();
   if (state.modal === 'checkout') return checkoutModal();
   if (state.modal === 'product') return productModal();
+  if (state.modal === 'success') return successModal();
   return '';
 }
 
@@ -187,6 +193,16 @@ function addToCart(id) {
   if (item) item.qty += 1;
   else state.cart.push({ id: product.id, name: product.name, price: Number(product.price), qty: 1, stock: product.stock });
   saveCart(); renderToast(`${product.name} 已加入購物袋`);
+}
+
+function changeCartQuantity(id, delta) {
+  const item = state.cart.find((entry) => entry.id === id);
+  if (!item) return;
+  const next = item.qty + delta;
+  if (next < 1) { state.cart = state.cart.filter((entry) => entry.id !== id); }
+  else if (next <= item.stock) { item.qty = next; }
+  else { renderToast('已達目前可購買庫存'); return; }
+  saveCart(); render();
 }
 
 async function signup() {
@@ -250,12 +266,13 @@ async function checkout() {
   const note = document.querySelector('#note')?.value.trim() || '';
   if (!recipient || !phone) { renderToast('請填寫收件人與電話'); return; }
   state.busy = true; render();
-  const { error } = await supabase.rpc('place_order', { p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: state.cart.map((item) => ({ product_id: item.id, quantity: item.qty })) });
+  const { data: orderId, error } = await supabase.rpc('place_order', { p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: state.cart.map((item) => ({ product_id: item.id, quantity: item.qty })) });
   state.busy = false;
   if (error) { renderToast(friendlyError(error)); return; }
-  state.cart = []; saveCart(); state.modal = null; state.view = 'orders';
+  state.cart = []; saveCart(); state.view = 'orders';
   await Promise.all([loadOrders(), loadProducts()]);
-  renderToast('訂單已送出，我們會盡快確認！');
+  state.lastOrder = state.orders.find((order) => order.id === orderId) || state.orders[0] || null;
+  state.modal = 'success'; render();
 }
 
 async function uploadProductImage(file) {
@@ -329,11 +346,18 @@ function exportCsv() {
 
 function bind() {
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => { state.view = button.dataset.view; if ((state.view === 'orders' || state.view === 'admin') && state.user) await loadOrders(); render(); }));
-  document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => document.querySelector('#products')?.scrollIntoView({ behavior: 'smooth' })));
+  document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => {
+    const target = button.dataset.scroll;
+    if (state.view !== 'shop') {
+      state.view = 'shop'; render();
+      requestAnimationFrame(() => document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' }));
+    } else document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' });
+  }));
   document.querySelectorAll('[data-add]').forEach((button) => button.addEventListener('click', () => addToCart(button.dataset.add)));
   document.querySelector('[data-action="cart"]')?.addEventListener('click', () => { state.modal = 'cart'; render(); });
   document.querySelectorAll('[data-modal]').forEach((button) => button.addEventListener('click', () => { state.authMode = 'login'; state.modal = button.dataset.modal; render(); }));
   document.querySelectorAll('[data-remove]').forEach((button) => button.addEventListener('click', () => { state.cart = state.cart.filter((item) => item.id !== button.dataset.remove); saveCart(); render(); }));
+  document.querySelectorAll('[data-cart-change]').forEach((button) => button.addEventListener('click', () => changeCartQuantity(button.dataset.cartChange, Number(button.dataset.delta))));
   document.querySelectorAll('[data-action="close"]').forEach((button) => button.addEventListener('click', () => { state.modal = null; render(); }));
   document.querySelectorAll('[data-auth-mode]').forEach((button) => button.addEventListener('click', () => { state.authMode = button.dataset.authMode; render(); }));
   document.querySelector('[data-action="signup"]')?.addEventListener('click', signup);
@@ -345,6 +369,8 @@ function bind() {
   document.querySelector('[data-action="logout"]')?.addEventListener('click', async () => { await supabase.auth.signOut(); state.view = 'shop'; renderToast('已登出'); });
   document.querySelector('[data-action="begin-checkout"]')?.addEventListener('click', () => { if (!state.user) { state.authMode = 'login'; state.modal = 'auth'; renderToast('請先登入，再送出訂單'); return; } state.modal = 'checkout'; render(); });
   document.querySelector('[data-action="checkout"]')?.addEventListener('click', checkout);
+  document.querySelector('[data-action="view-orders"]')?.addEventListener('click', () => { state.modal = null; state.view = 'orders'; render(); });
+  document.querySelector('[data-action="continue-shopping"]')?.addEventListener('click', () => { state.modal = null; state.view = 'shop'; render(); });
   document.querySelector('[data-action="export"]')?.addEventListener('click', exportCsv);
   document.querySelector('[data-action="new-product"]')?.addEventListener('click', () => { state.editingProductId = null; state.modal = 'product'; render(); });
   document.querySelectorAll('[data-edit-product]').forEach((button) => button.addEventListener('click', () => { state.editingProductId = button.dataset.editProduct; state.modal = 'product'; render(); }));
