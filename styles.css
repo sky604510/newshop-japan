@@ -49,6 +49,8 @@ h1 { font-family:'Playfair Display','Noto Sans TC',serif; font-size:clamp(46px,7
 .auth-tabs { display:grid; grid-template-columns:1fr 1fr; gap:5px; padding:4px; margin:2px 0 18px; border-radius:12px; background:#eeefe7; }
 .auth-tabs button { padding:9px; border-radius:9px; color:var(--muted); background:transparent; font-weight:700; }
 .auth-tabs button.active { color:var(--ink); background:var(--paper); box-shadow:0 3px 10px rgba(24,53,44,.08); }
+.forgot-link { display:block; margin:12px auto 0; padding:4px 8px; color:var(--green); background:transparent; font-size:13px; font-weight:700; }
+.forgot-link:hover { text-decoration:underline; }
 .order { display:flex; justify-content:space-between; gap:20px; border-bottom:1px solid var(--line); padding:13px 0; } .order:last-child { border-bottom:0; } .status { color:var(--coral); font-size:12px; font-weight:700; }
 .admin-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; } .stat { background:#edf0df; border-radius:14px; padding:16px; } .stat small { color:var(--muted); } .stat strong { display:block; font-size:26px; margin-top:7px; }
 .empty { color:var(--muted); background:#f2f3ed; border-radius:14px; padding:20px; text-align:center; }

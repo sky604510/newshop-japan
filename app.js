@@ -86,11 +86,19 @@ async function initialize() {
   }
 }
 
-supabase.auth.onAuthStateChange((_event, session) => window.setTimeout(() => syncSession(session), 0));
+supabase.auth.onAuthStateChange((event, session) => window.setTimeout(() => {
+  if (event === 'PASSWORD_RECOVERY') {
+    state.user = session?.user || null;
+    state.modal = 'new-password';
+    render();
+    return;
+  }
+  syncSession(session);
+}, 0));
 
 function nav() {
   const admin = state.profile?.role === 'admin' ? `<button class="${state.view === 'admin' ? 'active' : ''}" data-view="admin">店主後台</button>` : '';
-  const member = state.user ? esc(state.profile?.display_name || state.profile?.username || '會員') : '登入';
+  const member = state.user ? esc(state.user.email || '會員') : '登入';
   return `<header class="nav"><button class="brand" data-view="shop"><span class="mark">✦</span><span>NewShop日本連線代購<small style="display:block;color:var(--muted);font-weight:500;font-size:10px;letter-spacing:.18em">JAPAN SELECT SHOP</small></span></button><nav class="navlinks"><button class="${state.view === 'shop' ? 'active' : ''}" data-view="shop">買東西</button><button class="${state.view === 'orders' ? 'active' : ''}" data-view="orders">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物袋 <span class="badge">${cartCount()}</span></button></nav></header>`;
 }
 
@@ -112,7 +120,7 @@ function orderRow(order) {
 
 function ordersView() {
   if (!state.user) return `<main class="split"><section class="panel"><span class="eyebrow">MEMBER AREA</span><h2 style="margin-top:10px">登入後查看訂單</h2><p style="color:var(--muted);line-height:1.8">使用信箱建立帳號，就能跨裝置查詢每次訂購。</p><button class="btn btn-primary" data-modal="auth">登入／註冊</button></section><section class="panel"><h2>訂單紀錄</h2><div class="empty">登入後顯示你的 SQL 訂單資料</div></section></main>`;
-  return `<main class="split"><section class="panel"><span class="eyebrow">MEMBER AREA</span><h2 style="margin-top:10px">${esc(state.profile?.display_name || state.profile?.username)} 的訂單</h2><p style="color:var(--muted)">${esc(state.user.email)}</p><button class="btn btn-primary" data-action="logout">登出</button></section><section class="panel"><h2>訂單紀錄</h2>${state.orders.length ? state.orders.map(orderRow).join('') : `<div class="empty">目前還沒有訂單<br/><button class="btn btn-accent" data-view="shop" style="margin-top:12px">去逛逛</button></div>`}</section></main>`;
+  return `<main class="split"><section class="panel"><span class="eyebrow">MEMBER AREA</span><h2 style="margin-top:10px">我的訂單</h2><p style="color:var(--muted)">${esc(state.user.email)}</p><button class="btn btn-primary" data-action="logout">登出</button></section><section class="panel"><h2>訂單紀錄</h2>${state.orders.length ? state.orders.map(orderRow).join('') : `<div class="empty">目前還沒有訂單<br/><button class="btn btn-accent" data-view="shop" style="margin-top:12px">去逛逛</button></div>`}</section></main>`;
 }
 
 function adminView() {
@@ -129,14 +137,29 @@ function cartModal() {
 
 function authModal() {
   const register = state.authMode === 'register';
-  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">MEMBER</span><h2>${register ? '建立會員帳號' : '會員登入'}</h2></div><button class="close" data-action="close">×</button></div><div class="auth-tabs"><button class="${!register ? 'active' : ''}" data-auth-mode="login">登入</button><button class="${register ? 'active' : ''}" data-auth-mode="register">註冊</button></div><div class="field"><label>信箱</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com" /></div>${register ? `<div class="field"><label>帳號</label><input id="account" autocomplete="username" placeholder="你的會員帳號" /></div>` : ''}<div class="field"><label>密碼</label><input id="password" type="password" autocomplete="${register ? 'new-password' : 'current-password'}" placeholder="至少 6 個字元" /></div><button class="btn btn-primary" style="width:100%" data-action="${register ? 'signup' : 'login'}" ${state.busy ? 'disabled' : ''}>${state.busy ? '處理中…' : register ? '建立帳號' : '登入'}</button><p style="font-size:12px;color:var(--muted);margin:14px 0 0">密碼由 Supabase Auth 加密管理，NewShop 不會保存明文密碼。</p></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">MEMBER</span><h2>${register ? '使用 Email 註冊' : '會員登入'}</h2></div><button class="close" data-action="close">×</button></div><div class="auth-tabs"><button class="${!register ? 'active' : ''}" data-auth-mode="login">登入</button><button class="${register ? 'active' : ''}" data-auth-mode="register">註冊</button></div><div class="field"><label>Email</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com" /></div><div class="field"><label>密碼</label><input id="password" type="password" autocomplete="${register ? 'new-password' : 'current-password'}" placeholder="至少 6 個字元" /></div><button class="btn btn-primary" style="width:100%" data-action="${register ? 'signup' : 'login'}" ${state.busy ? 'disabled' : ''}>${state.busy ? '處理中…' : register ? '建立帳號' : '登入'}</button>${register ? '' : `<button class="forgot-link" data-action="forgot-password">忘記密碼？</button>`}<p style="font-size:12px;color:var(--muted);margin:14px 0 0">密碼由 Supabase Auth 加密管理，NewShop 不會保存明文密碼。</p></div></div>`;
+}
+
+function forgotPasswordModal() {
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">PASSWORD RESET</span><h2>重設密碼</h2></div><button class="close" data-action="close">×</button></div><p style="color:var(--muted);line-height:1.7">輸入註冊 Email，我們會寄送密碼重設連結。</p><div class="field"><label>Email</label><input id="recover-email" type="email" autocomplete="email" placeholder="you@example.com" /></div><button class="btn btn-primary" style="width:100%" data-action="send-recovery" ${state.busy ? 'disabled' : ''}>${state.busy ? '寄送中…' : '寄送重設信'}</button><button class="forgot-link" data-action="back-login">返回登入</button></div></div>`;
+}
+
+function newPasswordModal() {
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">NEW PASSWORD</span><h2>設定新密碼</h2></div></div><div class="field"><label>新密碼</label><input id="new-password" type="password" autocomplete="new-password" placeholder="至少 6 個字元" /></div><div class="field"><label>再次輸入</label><input id="confirm-password" type="password" autocomplete="new-password" placeholder="再次輸入新密碼" /></div><button class="btn btn-primary" style="width:100%" data-action="update-password" ${state.busy ? 'disabled' : ''}>${state.busy ? '更新中…' : '更新密碼'}</button></div></div>`;
 }
 
 function checkoutModal() {
   return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">CHECKOUT</span><h2>確認訂單</h2></div><button class="close" data-action="close">×</button></div><div class="field"><label>收件人</label><input id="customer" autocomplete="name" placeholder="請輸入姓名" /></div><div class="field"><label>聯絡電話</label><input id="phone" autocomplete="tel" placeholder="09xx-xxx-xxx" /></div><div class="field"><label>取貨方式</label><select id="delivery"><option>面交取貨</option><option>宅配到府</option></select></div><div class="field"><label>訂單備註</label><input id="note" placeholder="尺寸、顏色或其他需求（選填）" /></div><button class="btn btn-accent" style="width:100%" data-action="checkout" ${state.busy ? 'disabled' : ''}>${state.busy ? '送出中…' : `送出訂單・${money(cartTotal())}`}</button></div></div>`;
 }
 
-function modal() { return state.modal === 'cart' ? cartModal() : state.modal === 'auth' ? authModal() : state.modal === 'checkout' ? checkoutModal() : ''; }
+function modal() {
+  if (state.modal === 'cart') return cartModal();
+  if (state.modal === 'auth') return authModal();
+  if (state.modal === 'forgot') return forgotPasswordModal();
+  if (state.modal === 'new-password') return newPasswordModal();
+  if (state.modal === 'checkout') return checkoutModal();
+  return '';
+}
 
 function render() {
   const content = state.view === 'shop' ? shop() : state.view === 'orders' ? ordersView() : adminView();
@@ -156,11 +179,10 @@ function addToCart(id) {
 
 async function signup() {
   const email = document.querySelector('#email')?.value.trim();
-  const account = document.querySelector('#account')?.value.trim();
   const password = document.querySelector('#password')?.value || '';
-  if (!email || !account || password.length < 6) { renderToast('請填寫信箱、帳號及至少 6 個字元的密碼'); return; }
+  if (!email || password.length < 6) { renderToast('請填寫 Email 及至少 6 個字元的密碼'); return; }
   state.busy = true; render();
-  const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { username: account, account, display_name: account } } });
+  const { data, error } = await supabase.auth.signUp({ email, password });
   state.busy = false;
   if (error) { renderToast(friendlyError(error)); return; }
   state.modal = null;
@@ -176,6 +198,32 @@ async function login() {
   state.busy = false;
   if (error) { renderToast(friendlyError(error)); return; }
   state.modal = null; state.view = 'orders'; renderToast('登入成功');
+}
+
+async function sendRecovery() {
+  const email = document.querySelector('#recover-email')?.value.trim();
+  if (!email) { renderToast('請輸入註冊 Email'); return; }
+  state.busy = true; render();
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  state.busy = false;
+  if (error) { renderToast(friendlyError(error)); return; }
+  state.modal = null;
+  renderToast('重設信已寄出，請檢查 Email');
+}
+
+async function updatePassword() {
+  const password = document.querySelector('#new-password')?.value || '';
+  const confirmation = document.querySelector('#confirm-password')?.value || '';
+  if (password.length < 6) { renderToast('新密碼至少需要 6 個字元'); return; }
+  if (password !== confirmation) { renderToast('兩次輸入的密碼不一致'); return; }
+  state.busy = true; render();
+  const { error } = await supabase.auth.updateUser({ password });
+  state.busy = false;
+  if (error) { renderToast(friendlyError(error)); return; }
+  state.modal = null;
+  state.view = 'orders';
+  renderToast('密碼更新成功');
 }
 
 async function checkout() {
@@ -213,6 +261,10 @@ function bind() {
   document.querySelectorAll('[data-auth-mode]').forEach((button) => button.addEventListener('click', () => { state.authMode = button.dataset.authMode; render(); }));
   document.querySelector('[data-action="signup"]')?.addEventListener('click', signup);
   document.querySelector('[data-action="login"]')?.addEventListener('click', login);
+  document.querySelector('[data-action="forgot-password"]')?.addEventListener('click', () => { state.modal = 'forgot'; render(); });
+  document.querySelector('[data-action="back-login"]')?.addEventListener('click', () => { state.authMode = 'login'; state.modal = 'auth'; render(); });
+  document.querySelector('[data-action="send-recovery"]')?.addEventListener('click', sendRecovery);
+  document.querySelector('[data-action="update-password"]')?.addEventListener('click', updatePassword);
   document.querySelector('[data-action="logout"]')?.addEventListener('click', async () => { await supabase.auth.signOut(); state.view = 'shop'; renderToast('已登出'); });
   document.querySelector('[data-action="begin-checkout"]')?.addEventListener('click', () => { if (!state.user) { state.authMode = 'login'; state.modal = 'auth'; renderToast('請先登入，再送出訂單'); return; } state.modal = 'checkout'; render(); });
   document.querySelector('[data-action="checkout"]')?.addEventListener('click', checkout);
