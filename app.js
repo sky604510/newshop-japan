@@ -410,8 +410,12 @@ function updateDetailArtwork(product, market) {
   const image = new Image(); let committed = false;
   const commit = () => {
     if (committed || state.selectedProductId !== product.id || !image.naturalWidth) return;
-    committed = true; image.className = 'detail-product-image detail-image-enter'; image.alt = product.name;
-    current?.replaceWith(image);
+    committed = true;
+    if (current?.matches('img')) {
+      current.src = source; current.alt = product.name;
+    } else {
+      image.className = 'detail-product-image'; image.alt = product.name; current?.replaceWith(image);
+    }
   };
   image.addEventListener('load', commit, { once: true });
   image.src = source;
