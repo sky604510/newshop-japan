@@ -156,6 +156,9 @@ textarea { resize:vertical; }
 .admin-tabs { position:sticky; top:88px; z-index:6; display:grid; grid-template-columns:repeat(5,1fr); gap:6px; padding:6px; border:1px solid var(--ink); border-radius:18px; background:rgba(255,247,250,.94); backdrop-filter:blur(14px); box-shadow:var(--soft-shadow); }
 .admin-tabs button { padding:12px; border-radius:12px; color:var(--muted); background:transparent; font-weight:800; }
 .admin-tabs button.active { color:white; background:var(--ink); }
+.sub-tabs { display:flex; gap:6px; width:max-content; margin:0 0 18px; padding:4px; border:1px solid var(--line); border-radius:999px; background:#fff7fa; }
+.sub-tabs button { padding:8px 15px; border-radius:999px; color:var(--muted); background:transparent; font-size:12px; font-weight:800; }
+.sub-tabs button.active { color:white; background:var(--rose-deep); }
 .admin-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
 .stat { background:#fff2f6; border-radius:17px; padding:17px; }
 .stat small { color:var(--muted); }
@@ -226,6 +229,8 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
 .procurement-table .profit { color:#16845b; font-weight:800; }
 .procurement-table .profit.negative { color:#c63e62; }
 .shipment-table td:first-child small { display:block; color:var(--muted); margin-top:4px; }
+.account-email { display:block; max-width:240px; margin-top:4px; color:var(--rose-deep); font-size:11px; overflow-wrap:anywhere; }
+.procurement-check { width:19px; height:19px; accent-color:var(--rose-deep); cursor:pointer; }
 .order-item-admin { display:grid; grid-template-columns:minmax(130px,1fr) auto; align-items:center; gap:4px 10px; min-width:330px; padding:6px 0; border-bottom:1px dashed var(--line); }
 .order-item-admin:last-child { border-bottom:0; }
 .order-item-admin > div { display:flex; align-items:center; gap:4px; }
@@ -233,6 +238,8 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
 .order-item-admin button { padding:7px 9px; border-radius:8px; color:white; background:var(--ink); font-size:11px; font-weight:800; }
 .order-item-admin small { grid-column:1/-1; color:var(--rose-deep); }
 .order-item-admin.price-adjusted > span,.order-item-admin.price-adjusted input { font-weight:900; font-style:italic; }
+.item-admin-controls { flex-wrap:wrap; justify-content:flex-end; }
+.item-admin-controls label { display:flex; align-items:center; gap:4px; color:var(--muted); font-size:10px; font-weight:800; white-space:nowrap; }
 .price-prefix { color:var(--muted); font-size:10px; }
 
 .market-basic-grid { display:grid; grid-template-columns:1fr 220px; gap:12px; }
@@ -241,7 +248,7 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
 .image-button { position:relative; overflow:hidden; }
 .image-button input,.image-pick input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
 .compact-list { gap:8px; }
-.compact-item { display:grid; grid-template-columns:28px minmax(180px,1.7fr) repeat(3,minmax(78px,.62fr)) 132px 58px 48px; gap:8px; align-items:center; padding:10px; border-radius:14px; }
+.compact-item { display:grid; grid-template-columns:28px minmax(180px,1.7fr) repeat(5,minmax(72px,.58fr)) 132px 58px 48px; gap:8px; align-items:center; padding:10px; border-radius:14px; }
 .item-index { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; color:white; background:var(--ink); font-size:11px; font-weight:800; }
 .compact-input { display:grid; gap:4px; }
 .compact-input > span { color:var(--muted); font-size:10px; font-weight:800; }
