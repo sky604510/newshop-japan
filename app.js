@@ -16,7 +16,7 @@ const state = {
   marketDraft: null, editingMarketId: null, lastOrder: null,
   customerDraft: null, checkoutMode: 'general',
   checkoutDraft: JSON.parse(localStorage.getItem('newshop_checkout_draft') || '{}'),
-  authMode: 'login', loading: true, busy: false, toast: '', marketFeatureReady: true, operationsReady: true,
+  authMode: 'login', adminTab: 'orders', loading: true, busy: false, toast: '', marketFeatureReady: true, operationsReady: true, costReady: true, pricingReady: true,
 };
 
 const money = (value) => `NT$ ${Number(value || 0).toLocaleString('zh-TW')}`;
@@ -95,6 +95,16 @@ async function loadMarkets() {
   syncCartWithProducts();
 }
 
+async function loadProductCosts() {
+  if (!state.user || !isManager()) return;
+  const { data, error } = await supabase.from('product_costs').select('product_id,cost');
+  if (error) { state.costReady = false; return; }
+  state.costReady = true;
+  const costs = new Map((data || []).map((row) => [row.product_id, Number(row.cost)]));
+  state.markets.forEach((market) => market.products.forEach((product) => { product.cost = costs.get(product.id) || 0; }));
+  syncCartWithProducts();
+}
+
 async function loadProfile() {
   if (!state.user) { state.profile = null; return; }
   const { data, error } = await supabase.from('profiles').select('id,username,display_name,role').eq('id', state.user.id).single();
@@ -105,9 +115,16 @@ async function loadProfile() {
 async function loadOrders() {
   if (!state.user) { state.orders = []; return; }
   let result = await supabase.from('orders')
-    .select('id,order_number,user_id,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_price,quantity,subtotal)')
+    .select('id,order_number,user_id,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)')
     .order('created_at', { ascending: false });
-    if (result.error && /customer_id|product_id|market_id/i.test(result.error.message || '')) {
+  if (result.error && /unit_cost|original_unit_price|price_adjusted_at/i.test(result.error.message || '')) {
+    if (/unit_cost/i.test(result.error.message || '')) state.costReady = false;
+    if (/original_unit_price|price_adjusted_at/i.test(result.error.message || '')) state.pricingReady = false;
+    result = await supabase.from('orders')
+      .select('id,order_number,user_id,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_price,quantity,subtotal)')
+      .order('created_at', { ascending: false });
+  }
+  if (result.error && /customer_id|product_id|market_id/i.test(result.error.message || '')) {
     state.operationsReady = false;
     result = await supabase.from('orders')
       .select('id,order_number,user_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_name,unit_price,quantity,subtotal)')
@@ -136,7 +153,7 @@ async function syncSession(session) {
     if (state.view === 'admin') state.view = 'shop';
     await loadMarkets(); render(); return;
   }
-  try { await loadProfile(); await Promise.all([loadOrders(), loadMarkets(), loadCustomers()]); }
+  try { await loadProfile(); await Promise.all([loadOrders(), loadMarkets(), loadCustomers()]); await loadProductCosts(); }
   catch (error) { renderToast(friendlyError(error)); }
   render();
 }
@@ -159,7 +176,7 @@ supabase.auth.onAuthStateChange((event, session) => window.setTimeout(() => {
 function nav() {
   const admin = isManager() ? `<button class="${state.view === 'admin' ? 'active' : ''}" data-view="admin">管理員後台</button>` : '';
   const member = state.user ? esc(state.user.email || '會員') : '登入';
-  return `<header class="nav"><button class="brand" data-view="shop"><img class="brand-logo" src="./assets/newshop-logo.png" alt="NewShop Logo"/><span>NewShop日本連線代購<small>JAPAN SELECT SHOP</small></span></button><nav class="navlinks"><button class="${state.view === 'shop' ? 'active' : ''}" data-view="shop">逛賣場</button><button data-scroll="guide">購物須知</button><button class="${state.view === 'orders' ? 'active' : ''}" data-view="orders">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物車 <span class="badge">${cartCount()}</span></button></nav></header>`;
+  return `<header class="nav"><button class="brand" data-view="shop"><span class="brand-mark"><span class="brand-logo-fallback">NS</span><img class="brand-logo" src="/assets/newshop-logo.png?v=2" alt="NewShop Logo"/></span><span>NewShop連線代購<small>SELECT SHOP</small></span></button><nav class="navlinks"><button class="${state.view === 'shop' ? 'active' : ''}" data-view="shop">逛賣場</button><button data-scroll="guide">購物須知</button><button class="${state.view === 'orders' ? 'active' : ''}" data-view="orders">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物車 <span class="badge">${cartCount()}</span></button></nav></header>`;
 }
 
 function marketPrice(market) {
@@ -202,7 +219,11 @@ function marketSummaries(includeZero = false) {
       const itemOrders = state.orders.filter((order) => order.status !== 'cancelled').flatMap((order) =>
         (order.order_items || []).filter((item) => item.product_id === product.id || (item.market_id === market.id && item.product_name === product.name)).map((item) => ({ ...item, order })),
       );
-      return { product, quantity: itemOrders.reduce((sum, item) => sum + Number(item.quantity), 0), buyers: new Set(itemOrders.map((item) => item.order.customer_id || item.order.phone)).size };
+      const quantity = itemOrders.reduce((sum, item) => sum + Number(item.quantity), 0); const currentCost = Number(product.cost || 0);
+      const revenue = itemOrders.reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+      const totalCost = itemOrders.reduce((sum, item) => sum + Number(item.unit_cost ?? currentCost) * Number(item.quantity), 0);
+      const cost = quantity ? totalCost / quantity : currentCost; const price = quantity ? revenue / quantity : Number(product.price || 0);
+      return { product, quantity, cost, price, revenue, totalCost, profit: revenue - totalCost, buyers: new Set(itemOrders.map((item) => item.order.customer_id || item.order.phone)).size };
     }).filter((row) => includeZero || row.quantity > 0),
   })).filter((entry) => includeZero || entry.rows.length);
 }
@@ -211,20 +232,50 @@ function latestCustomerOrder(customer) {
   return state.orders.find((order) => order.customer_id === customer.id || (!order.customer_id && order.phone === customer.phone));
 }
 
+function shipmentSummaries() {
+  const recipients = new Map();
+  for (const order of state.orders.filter((entry) => entry.status !== 'cancelled')) {
+    const key = `${String(order.recipient_name).trim().toLowerCase()}|${String(order.phone).trim()}`;
+    if (!recipients.has(key)) recipients.set(key, { recipient: order.recipient_name, phone: order.phone, delivery: order.delivery_method, items: new Map(), amount: 0, profit: 0 });
+    const recipient = recipients.get(key);
+    for (const item of order.order_items || []) {
+      const itemKey = item.product_id || item.product_name; const product = state.products.find((entry) => entry.id === item.product_id);
+      const unitCost = Number(item.unit_cost ?? product?.cost ?? 0); const quantity = Number(item.quantity); const amount = Number(item.unit_price) * quantity; const profit = amount - unitCost * quantity;
+      if (!recipient.items.has(itemKey)) recipient.items.set(itemKey, { name: item.product_name, quantity: 0, amount: 0, profit: 0 });
+      const row = recipient.items.get(itemKey); row.quantity += quantity; row.amount += amount; row.profit += profit;
+      recipient.amount += amount; recipient.profit += profit;
+    }
+  }
+  return [...recipients.values()].map((recipient) => ({ ...recipient, items: [...recipient.items.values()] }));
+}
+
+function orderItemEditor(item) {
+  const adjusted = item.original_unit_price != null;
+  return `<div class="order-item-admin ${adjusted ? 'price-adjusted' : ''}"><span>${esc(item.product_name)} × ${item.quantity}</span><div><span class="price-prefix">NT$</span><input data-order-item-price="${item.id}" type="number" min="0" value="${Number(item.unit_price)}" ${state.pricingReady ? '' : 'disabled'}/><button data-save-item-price="${item.id}" ${state.pricingReady ? '' : 'disabled'}>更新</button></div>${adjusted ? `<small>人工改價・原價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
+}
+
 function adminView() {
   if (!isManager()) return `<main class="panel admin-page"><div class="empty">這個頁面只開放管理員</div></main>`;
   const total = state.orders.filter((order) => order.status !== 'cancelled').reduce((sum, order) => sum + Number(order.total_amount), 0);
   const statusOptions = (current) => Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`).join('');
-  const orderRows = state.orders.map((order) => `<tr><td>${esc(order.order_number)}</td><td>${esc(order.recipient_name)}<br/><small>${esc(order.phone)}・${esc(order.delivery_method)}</small></td><td>${(order.order_items || []).map((item) => `${esc(item.product_name)} × ${item.quantity}`).join('<br/>')}</td><td>${money(order.total_amount)}</td><td><select data-order-status="${order.id}">${statusOptions(order.status)}</select></td></tr>`).join('');
+  const orderRows = state.orders.map((order) => `<tr><td>${esc(order.order_number)}</td><td>${esc(order.recipient_name)}<br/><small>${esc(order.phone)}・${esc(order.delivery_method)}</small></td><td>${(order.order_items || []).map(orderItemEditor).join('')}</td><td>${money(order.total_amount)}</td><td><select data-order-status="${order.id}">${statusOptions(order.status)}</select></td></tr>`).join('');
   const marketRows = state.markets.map((market) => { const cover = market.image_url || market.products.find((item) => item.image_url)?.image_url; return `<tr><td><div class="admin-market"><span class="admin-thumb">${cover ? `<img src="${esc(cover)}" alt=""/>` : market.emoji}</span><span><strong>${esc(market.name)}</strong><small>${market.is_active ? '已上架' : '已下架'}・${market.closes_at ? `收單 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}` : '未設定期限'}</small></span></div></td><td>${market.products.length}</td><td>${market.products.reduce((sum, item) => sum + Number(item.stock), 0)}</td><td><div class="admin-actions"><button class="btn btn-light" data-edit-market="${market.id}">編輯</button><button class="btn ${market.is_active ? 'btn-danger-soft' : 'btn-accent'}" data-toggle-market="${market.id}">${market.is_active ? '下架' : '上架'}</button></div></td></tr>`; }).join('');
-  const customerRows = state.customers.map((customer) => { const latest = latestCustomerOrder(customer); const latestItem = latest ? (latest.order_items || []).map((item) => item.product_name).join('、') : '尚未下單'; return `<tr data-customer-row="${customer.id}"><td><input data-customer-name value="${esc(customer.recipient_name)}"/><small>${esc(customer.email || '未綁定會員信箱')}</small></td><td><input data-customer-phone value="${esc(customer.phone)}"/></td><td><select data-customer-delivery>${deliverySelect(customer.delivery_method)}</select></td><td>${esc(latestItem)}${latest ? `<small>${new Date(latest.created_at).toLocaleDateString('zh-TW')}</small>` : ''}</td><td><label class="table-check"><input data-customer-regular type="checkbox" ${customer.is_regular ? 'checked' : ''}/>常客</label><label class="table-check vip"><input data-customer-vip type="checkbox" ${customer.is_vip ? 'checked' : ''}/>VIP</label></td><td><input data-customer-note value="${esc(customer.admin_note)}" placeholder="內部備註"/></td><td><button class="btn btn-light" data-save-customer="${customer.id}">儲存</button></td></tr>`; }).join('');
+  const customerRows = state.customers.map((customer) => { const latest = latestCustomerOrder(customer); const latestItem = latest ? (latest.order_items || []).map((item) => item.product_name).join('、') : '尚未下單'; return `<tr data-customer-row="${customer.id}"><td><input data-customer-name value="${esc(customer.recipient_name)}"/><small>${esc(customer.email || '未綁定會員信箱')}</small></td><td><input data-customer-phone value="${esc(customer.phone)}"/></td><td><select data-customer-delivery>${deliverySelect(customer.delivery_method)}</select></td><td>${esc(latestItem)}${latest ? `<small>${new Date(latest.created_at).toLocaleDateString('zh-TW')}</small>` : ''}</td><td><div class="customer-tags"><label class="table-check"><input data-customer-regular type="checkbox" ${customer.is_regular ? 'checked' : ''}/><span>常客</span></label><label class="table-check vip"><input data-customer-vip type="checkbox" ${customer.is_vip ? 'checked' : ''}/><span>VIP</span></label></div></td><td><input data-customer-note value="${esc(customer.admin_note)}" placeholder="內部備註"/></td><td><button class="btn btn-light" data-save-customer="${customer.id}">儲存</button></td></tr>`; }).join('');
   const summaries = marketSummaries();
-  const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>${rows.reduce((sum, row) => sum + row.quantity, 0)} 件</span></div><table class="admin-table"><thead><tr><th>商品品項</th><th>訂購數量</th><th>購買人數</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${esc(row.product.name)}</td><td><strong>${row.quantity}</strong></td><td>${row.buyers}</td></tr>`).join('')}</tbody></table></article>`).join('') : `<div class="empty">目前沒有可統計的有效訂單</div>`;
-  const migrationNotice = state.operationsReady ? '' : `<div class="setup-notice">請到 Supabase SQL Editor 執行最新的 <strong>customer_operations_upgrade.sql</strong>，才能使用常客、VIP、截止日與代下單。</div>`;
-  return `<main class="admin-page">${migrationNotice}<section class="panel"><div class="section-head"><div><span class="eyebrow">ADMIN CONSOLE</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 管理員</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${state.orders.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>訂單編號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>狀態</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">還沒有訂單</div>`}</section><section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>取消訂單不列入，方便現場直接依品項採購。</p></div></div><div class="summary-grid">${summaryHtml}</div></section><section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>常客可在管理員結帳時快速帶入收件資料。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>電話</th><th>取貨方式</th><th>最近商品</th><th>標籤</th><th>備註</th><th></th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section><section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>封面縮圖、截止日和各品項都可在這裡調整。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody>${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section></main>`;
+  const shipments = shipmentSummaries();
+  const shipmentRows = shipments.map((recipient) => `<tr><td><strong>${esc(recipient.recipient)}</strong><small>${esc(recipient.phone)}・${esc(recipient.delivery)}</small></td><td>${recipient.items.map((item) => `${esc(item.name)} × ${item.quantity}`).join('<br/>')}</td><td>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</td><td>${money(recipient.amount)}</td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}">${money(recipient.profit)}</td></tr>`).join('');
+  const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>商品</th><th>數量</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${esc(row.product.name)}</td><td><strong>${row.quantity}</strong></td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody></table></div></article>`).join('') : `<div class="empty">目前沒有可統計的有效訂單</div>`;
+  const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>，才能保存成本與計算獲利。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>，才能人工修改訂單商品金額。</div>`}`;
+  const orderPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 管理員</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${state.orders.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>訂單編號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>狀態</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">還沒有訂單</div>`}</section>`;
+  const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>顯示有效訂單的數量、成本、售價、購買人數與獲利。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="summary-grid">${summaryHtml}</div></section>`;
+  const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整所有有效訂單，方便包貨與核對。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div>${shipments.length ? `<div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人</th><th>訂購商品</th><th>總數量</th><th>金額</th><th>獲利</th></tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">目前沒有待整理的發貨資料</div>`}</section>`;
+  const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>管理常客、VIP 與內部備註。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>電話</th><th>取貨方式</th><th>最近商品</th><th>標籤</th><th>備註</th><th></th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
+  const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>管理封面、截止日、商品成本、售價與庫存。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody>${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
+  const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, customers: customerPanel, markets: marketPanel };
+  return `<main class="admin-page">${migrationNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button></div>${panels[state.adminTab] || orderPanel}</main>`;
 }
 
-function footer() { return `<footer><strong>NewShop日本連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
+function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
 
 function marketDetailModal() {
   const market = state.markets.find((item) => item.id === state.selectedMarketId);
@@ -234,11 +285,11 @@ function marketDetailModal() {
   const cover = selected?.image_url || market.image_url;
   const art = cover ? `<img src="${esc(cover)}" alt="${esc(market.name)}" />` : `<span class="detail-emoji">${market.emoji}</span>`;
   const closed = isClosed(market);
-  return `<div class="modal-backdrop"><div class="modal market-detail"><button class="close detail-close" data-action="close">×</button><div class="detail-media">${art}<span class="market-pill">${esc(market.name)}</span></div><div class="detail-copy"><span class="eyebrow">SELECT YOUR ITEM</span><h2>${esc(market.name)}</h2><p>${esc(market.description)}</p>${market.closes_at ? `<div class="deadline ${closed ? 'closed' : ''}">${closed ? '此賣場已截止收單' : `收單至 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}`}</div>` : ''}<div class="item-label">品項 <small>每款價格獨立計算</small></div><div class="item-options">${items.map((item) => `<button class="item-option ${selected?.id === item.id ? 'selected' : ''}" data-select-item="${item.id}" ${item.stock <= 0 || closed ? 'disabled' : ''}><span>${esc(item.name)}</span><strong>${money(item.price)}</strong><small>${item.stock > 0 && !closed ? '可購買' : '無庫存'}</small></button>`).join('')}</div>${selected ? `<div class="detail-buy"><div><span>數量</span><div class="qty-control"><button data-detail-qty="-1" ${state.detailQty <= 1 ? 'disabled' : ''}>−</button><strong>${state.detailQty}</strong><button data-detail-qty="1" ${state.detailQty >= selected.stock || closed ? 'disabled' : ''}>＋</button></div></div><div class="detail-total"><span>小計</span><strong>${money(Number(selected.price) * state.detailQty)}</strong></div></div><button class="btn btn-primary add-cart-wide" data-action="add-selected-item" ${selected.stock <= 0 || closed ? 'disabled' : ''}>${closed ? '賣場已截止收單' : selected.stock <= 0 ? '無庫存' : '加入購物車'}</button>` : `<div class="empty">這個賣場還沒有品項</div>`}</div></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal market-detail"><button class="close detail-close" data-action="close">×</button><div class="detail-media">${art}<span class="market-pill">${esc(market.name)}</span></div><div class="detail-copy"><span class="eyebrow">SELECT YOUR ITEM</span><h2>${esc(market.name)}</h2><p>${esc(market.description)}</p>${market.closes_at ? `<div class="deadline ${closed ? 'closed' : ''}">${closed ? '此賣場已截止收單' : `收單至 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}`}</div>` : ''}<div class="item-label">品項 <small>每款價格獨立計算</small></div><div class="item-options">${items.map((item) => `<button class="item-option ${selected?.id === item.id ? 'selected' : ''}" data-select-item="${item.id}" ${item.stock <= 0 || closed ? 'disabled' : ''}><span>${esc(item.name)}</span><strong>${money(item.price)}</strong><small>${item.stock > 0 && !closed ? '可購買' : '無庫存'}</small></button>`).join('')}</div>${selected ? `<div class="detail-buy"><div><span>數量</span><div class="qty-control"><button data-detail-qty="-1" ${state.detailQty <= 1 ? 'disabled' : ''}>−</button><strong data-detail-count>${state.detailQty}</strong><button data-detail-qty="1" ${state.detailQty >= selected.stock || closed ? 'disabled' : ''}>＋</button></div></div><div class="detail-total"><span>小計</span><strong data-detail-total>${money(Number(selected.price) * state.detailQty)}</strong></div></div><button class="btn btn-primary add-cart-wide" data-action="add-selected-item" ${selected.stock <= 0 || closed ? 'disabled' : ''}>${closed ? '賣場已截止收單' : selected.stock <= 0 ? '無庫存' : '加入購物車'}</button>` : `<div class="empty">這個賣場還沒有品項</div>`}</div></div></div>`;
 }
 
 function cartModal() {
-  return `<div class="modal-backdrop"><div class="modal cart-modal"><div class="modal-head"><div><span class="eyebrow">YOUR CART</span><h2>購物車</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="cart-line"><div><small>${esc(item.market_name || '零售區')}</small><strong>${esc(item.name)}</strong><div class="cart-subtotal">${money(Number(item.price) * item.qty)}</div></div><div class="cart-controls"><button data-cart-change="${item.id}" data-delta="-1">−</button><strong>${item.qty}</strong><button data-cart-change="${item.id}" data-delta="1" ${item.qty >= item.stock ? 'disabled' : ''}>＋</button><button class="remove-link" data-remove="${item.id}">移除</button></div></div>`).join('')}<div class="cart-total"><strong>商品合計</strong><strong>${money(cartTotal())}</strong></div><p class="cart-note">最終付款與取貨資訊由店主確認。</p><button class="btn btn-primary add-cart-wide" data-action="begin-checkout">前往結帳</button>` : `<div class="empty">購物車還是空的</div>`}</div></div>`;
+  return `<div class="modal-backdrop"><div class="modal cart-modal"><div class="modal-head"><div><span class="eyebrow">YOUR CART</span><h2>購物車</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="cart-line" data-cart-line="${item.id}"><div><small>${esc(item.market_name || '零售區')}</small><strong>${esc(item.name)}</strong><div class="cart-subtotal" data-cart-subtotal="${item.id}">${money(Number(item.price) * item.qty)}</div></div><div class="cart-controls"><button data-cart-change="${item.id}" data-delta="-1">−</button><strong data-cart-qty="${item.id}">${item.qty}</strong><button data-cart-change="${item.id}" data-delta="1" ${item.qty >= item.stock ? 'disabled' : ''}>＋</button><button class="remove-link" data-remove="${item.id}">移除</button></div></div>`).join('')}<div class="cart-total"><strong>商品合計</strong><strong data-cart-total>${money(cartTotal())}</strong></div><p class="cart-note">最終付款與取貨資訊由店主確認。</p><button class="btn btn-primary add-cart-wide" data-action="begin-checkout">前往結帳</button>` : `<div class="empty">購物車還是空的</div>`}</div></div>`;
 }
 
 function authModal() {
@@ -272,8 +323,8 @@ function createMarketDraft(market) {
 
 function marketEditorModal() {
   const draft = state.marketDraft || createMarketDraft();
-  const rows = draft.products.map((item, index) => `<div class="item-editor" data-item-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><div class="item-editor-head"><strong>品項 ${index + 1}</strong>${item.id ? `<label class="mini-switch"><input data-item-active type="checkbox" ${item.is_active !== false ? 'checked' : ''}/><span>上架</span></label>` : `<button class="remove-link" data-remove-draft-item="${esc(item.key)}">移除</button>`}</div><div class="field"><label>品項名稱</label><input data-item-name value="${esc(item.name || '')}" placeholder="例：粉色／M 號" /></div><div class="form-grid"><div class="field"><label>金額（NT$）</label><input data-item-price type="number" min="0" value="${item.price ?? ''}" /></div><div class="field"><label>數量</label><input data-item-stock type="number" min="0" step="1" value="${item.stock ?? 0}" /></div></div><div class="upload-row"><span class="upload-thumb">${item.file ? `<img src="${URL.createObjectURL(item.file)}" alt="預覽"/>` : item.image_url ? `<img src="${esc(item.image_url)}" alt="預覽"/>` : 'IMG'}</span><div class="field"><label>品項圖片（選填）</label><input data-item-image type="file" accept="image/jpeg,image/png,image/webp,image/gif"/><label class="inline-check"><input data-item-remove-bg type="checkbox" ${item.removeBg ? 'checked' : ''}/> 自動去除淺色背景</label></div></div></div>`).join('');
-  return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="field"><label>賣場／商品類別名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購" /></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="3">${esc(draft.description)}</textarea></div><div class="form-grid"><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>儲存後立即上架</span></label></div><div class="upload-row"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : 'COVER'}</span><div class="field"><label>賣場封面（選填）</label><input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去除淺色背景（適合白底商品照）</label></div></div><div class="editor-divider"><div><strong>賣場品項</strong><small>每個品項分別設定金額與數量</small></div><button class="btn btn-light" data-action="add-draft-item">＋ 新增品項</button></div><div class="item-editors">${rows || `<div class="empty">請先新增至少一個品項</div>`}</div><button class="btn btn-primary add-cart-wide" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與品項'}</button></div></div>`;
+  const rows = draft.products.map((item, index) => `<div class="item-editor compact-item" data-item-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><span class="item-index">${index + 1}</span><label class="compact-input item-name"><span>商品名稱</span><input data-item-name value="${esc(item.name || '')}" placeholder="商品或規格名稱"/></label><label class="compact-input"><span>成本</span><input data-item-cost type="number" min="0" value="${item.cost ?? 0}"/></label><label class="compact-input"><span>售價</span><input data-item-price type="number" min="0" value="${item.price ?? ''}"/></label><label class="compact-input"><span>數量</span><input data-item-stock type="number" min="0" step="1" value="${item.stock ?? 0}"/></label><div class="compact-image"><span class="upload-thumb">${item.file ? `<img src="${URL.createObjectURL(item.file)}" alt="預覽"/>` : item.image_url ? `<img src="${esc(item.image_url)}" alt="預覽"/>` : 'IMG'}</span><label class="image-pick" title="選擇商品圖片">＋<input data-item-image type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><label class="remove-bg-mini" title="自動去除淺色背景"><input data-item-remove-bg type="checkbox" ${item.removeBg ? 'checked' : ''}/>去背</label></div><label class="mini-switch"><input data-item-active type="checkbox" ${item.is_active !== false ? 'checked' : ''}/><span>上架</span></label>${item.id ? '<span class="saved-item">已儲存</span>' : `<button class="item-delete" data-remove-draft-item="${esc(item.key)}" title="移除品項">×</button>`}</div>`).join('');
+  return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="market-basic-grid"><div class="field"><label>賣場名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購"/></div><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="2">${esc(draft.description)}</textarea></div><div class="market-cover-compact"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : 'COVER'}</span><label class="btn btn-light image-button">選擇封面<input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去背</label><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>立即上架</span></label></div><div class="editor-divider"><div><strong>商品／規格</strong><small>同一列完成名稱、成本、售價、數量與圖片</small></div><button class="btn btn-light" data-action="add-draft-item">＋ 新增選項</button></div><div class="item-editors compact-list">${rows || `<div class="empty">請先新增至少一個商品</div>`}</div><div class="editor-save-bar"><span>共 ${draft.products.length} 個商品</span><button class="btn btn-primary" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與商品'}</button></div></div></div>`;
 }
 
 function modal() {
@@ -317,10 +368,24 @@ function addSelectedItem() {
 function changeCartQuantity(id, delta) {
   const item = state.cart.find((entry) => entry.id === id); if (!item) return;
   const next = item.qty + delta;
-  if (next < 1) state.cart = state.cart.filter((entry) => entry.id !== id);
-  else if (next <= item.stock) item.qty = next;
+  if (next < 1) { state.cart = state.cart.filter((entry) => entry.id !== id); saveCart(); render(); return; }
+  if (next <= item.stock) item.qty = next;
   else { renderToast('已達目前可購買庫存'); return; }
-  saveCart(); render();
+  saveCart();
+  const quantity = document.querySelector(`[data-cart-qty="${id}"]`); if (quantity) quantity.textContent = item.qty;
+  const subtotal = document.querySelector(`[data-cart-subtotal="${id}"]`); if (subtotal) subtotal.textContent = money(Number(item.price) * item.qty);
+  const plus = document.querySelector(`[data-cart-change="${id}"][data-delta="1"]`); if (plus) plus.disabled = item.qty >= item.stock;
+  const total = document.querySelector('[data-cart-total]'); if (total) total.textContent = money(cartTotal());
+  const badge = document.querySelector('.badge'); if (badge) badge.textContent = cartCount();
+}
+
+function changeDetailQuantity(delta) {
+  const product = state.products.find((item) => item.id === state.selectedProductId); if (!product) return;
+  state.detailQty = Math.max(1, Math.min(product.stock, state.detailQty + delta));
+  const count = document.querySelector('[data-detail-count]'); if (count) count.textContent = state.detailQty;
+  const total = document.querySelector('[data-detail-total]'); if (total) total.textContent = money(Number(product.price) * state.detailQty);
+  const minus = document.querySelector('[data-detail-qty="-1"]'); if (minus) minus.disabled = state.detailQty <= 1;
+  const plus = document.querySelector('[data-detail-qty="1"]'); if (plus) plus.disabled = state.detailQty >= product.stock;
 }
 
 async function signup() {
@@ -410,7 +475,7 @@ function syncMarketDraftFromForm() {
     removeBg: Boolean(document.querySelector('#market-remove-bg')?.checked),
     products: [...document.querySelectorAll('[data-item-row]')].map((row) => {
       const key = row.dataset.key; const old = previous.get(key) || {};
-      return { ...old, key, id: row.dataset.id || null, name: row.querySelector('[data-item-name]')?.value.trim() || '', price: row.querySelector('[data-item-price]')?.value || '', stock: row.querySelector('[data-item-stock]')?.value || '0', is_active: row.querySelector('[data-item-active]')?.checked ?? true, file: row.querySelector('[data-item-image]')?.files?.[0] || old.file || null, removeBg: Boolean(row.querySelector('[data-item-remove-bg]')?.checked) };
+      return { ...old, key, id: row.dataset.id || null, name: row.querySelector('[data-item-name]')?.value.trim() || '', cost: row.querySelector('[data-item-cost]')?.value || '0', price: row.querySelector('[data-item-price]')?.value || '', stock: row.querySelector('[data-item-stock]')?.value || '0', is_active: row.querySelector('[data-item-active]')?.checked ?? true, file: row.querySelector('[data-item-image]')?.files?.[0] || old.file || null, removeBg: Boolean(row.querySelector('[data-item-remove-bg]')?.checked) };
     }),
   };
 }
@@ -422,10 +487,11 @@ function openMarketEditor(id = null) {
 
 async function saveMarket() {
   if (!isManager()) return;
+  if (!state.costReady) { renderToast('請先在 Supabase 執行 product_cost_upgrade.sql'); return; }
   syncMarketDraftFromForm();
   const draft = state.marketDraft; const items = draft.products; const marketImage = draft.file;
   if (!draft.name || !draft.closes_at || !items.length) { renderToast('請填寫賣場名稱、截止日期，並建立至少一個品項'); return; }
-  if (items.some((item) => !item.name || !Number.isFinite(Number(item.price)) || Number(item.price) < 0 || !Number.isInteger(Number(item.stock)) || Number(item.stock) < 0)) { renderToast('請正確填寫每個品項的名稱、金額與數量'); return; }
+  if (items.some((item) => !item.name || !Number.isFinite(Number(item.cost)) || Number(item.cost) < 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0 || !Number.isInteger(Number(item.stock)) || Number(item.stock) < 0)) { renderToast('請正確填寫每個品項的名稱、成本、售價與數量'); return; }
   state.busy = true; render();
   try {
     const existing = state.markets.find((item) => item.id === state.editingMarketId);
@@ -440,10 +506,12 @@ async function saveMarket() {
       const imageUrl = await uploadImage(item.file, item.removeBg);
       const payload = { market_id: marketId, name: item.name, description: item.description || '', price: Number(item.price), stock: Number(item.stock), is_active: item.is_active };
       if (imageUrl) payload.image_url = imageUrl; else if (!item.id) payload.image_url = null;
-      const result = item.id ? await supabase.from('products').update(payload).eq('id', item.id) : await supabase.from('products').insert(payload);
+      const result = item.id ? await supabase.from('products').update(payload).eq('id', item.id).select('id').single() : await supabase.from('products').insert(payload).select('id').single();
       if (result.error) throw result.error;
+      const { error: costError } = await supabase.rpc('admin_set_product_cost', { p_product_id: result.data.id, p_cost: Number(item.cost), p_apply_to_unset_history: true });
+      if (costError) throw costError;
     }
-    await loadMarkets(); state.modal = null; state.marketDraft = null; state.editingMarketId = null; renderToast(existing ? '賣場與品項已更新' : '賣場已建立');
+    await loadMarkets(); await loadProductCosts(); state.modal = null; state.marketDraft = null; state.editingMarketId = null; renderToast(existing ? '賣場與品項已更新' : '賣場已建立');
   } catch (error) { renderToast(friendlyError(error)); }
   finally { state.busy = false; render(); }
 }
@@ -458,6 +526,15 @@ async function updateOrderStatus(id, status) {
   if (!isManager() || !statusLabels[status]) return;
   const { error } = await supabase.from('orders').update({ status }).eq('id', id); if (error) { renderToast(friendlyError(error)); return; }
   await loadOrders(); renderToast('訂單狀態已更新');
+}
+
+async function updateOrderItemPrice(id) {
+  if (!isManager() || !state.pricingReady) return;
+  const input = document.querySelector(`[data-order-item-price="${id}"]`); const price = Number(input?.value);
+  if (!Number.isFinite(price) || price < 0) { renderToast('請輸入正確的商品金額'); return; }
+  const { error } = await supabase.rpc('admin_update_order_item_price', { p_order_item_id: id, p_unit_price: price });
+  if (error) { renderToast(friendlyError(error)); return; }
+  await loadOrders(); renderToast('商品金額已更新，訂單總額已重新計算');
 }
 
 async function createCustomer() {
@@ -505,16 +582,23 @@ async function exportExcel() {
   try {
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
     const workbook = XLSX.utils.book_new(); const usedNames = new Set(['訂單']);
-    const orderRows = state.orders.flatMap((order) => (order.order_items || []).map((item) => ({
-      訂單編號: order.order_number, 日期: new Date(order.created_at).toLocaleString('zh-TW'), 收件人: order.recipient_name,
-      電話: order.phone, 取貨方式: order.delivery_method, 商品品項: item.product_name, 數量: Number(item.quantity),
-      單價: Number(item.unit_price), 小計: Number(item.subtotal), 訂單總額: Number(order.total_amount), 狀態: statusLabels[order.status] || order.status, 備註: order.note || '',
-    })));
-    const ordersSheet = XLSX.utils.json_to_sheet(orderRows.length ? orderRows : [{ 提示: '目前沒有訂單' }]); ordersSheet['!cols'] = [{ wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 28 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 24 }];
+    const orderRows = state.orders.flatMap((order) => (order.order_items || []).map((item) => {
+      const product = state.products.find((entry) => entry.id === item.product_id); const unitCost = Number(item.unit_cost ?? product?.cost ?? 0); const quantity = Number(item.quantity);
+      return { 訂單編號: order.order_number, 日期: new Date(order.created_at).toLocaleString('zh-TW'), 收件人: order.recipient_name,
+        電話: order.phone, 取貨方式: order.delivery_method, 商品品項: item.product_name, 數量: quantity,
+        單件成本: unitCost, 售價: Number(item.unit_price), 成本合計: unitCost * quantity, 銷售小計: Number(item.subtotal),
+        商品獲利: (Number(item.unit_price) - unitCost) * quantity, 原始售價: item.original_unit_price == null ? Number(item.unit_price) : Number(item.original_unit_price),
+        人工改價: item.original_unit_price == null ? '否' : '是', 訂單總額: Number(order.total_amount), 狀態: statusLabels[order.status] || order.status, 備註: order.note || '' };
+    }));
+    const ordersSheet = XLSX.utils.json_to_sheet(orderRows.length ? orderRows : [{ 提示: '目前沒有訂單' }]); ordersSheet['!cols'] = [{ wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 28 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 24 }];
     XLSX.utils.book_append_sheet(workbook, ordersSheet, '訂單');
+    const shipmentRows = shipmentSummaries().flatMap((recipient) => recipient.items.map((item) => ({ 收件人: recipient.recipient, 聯絡電話: recipient.phone, 取貨方式: recipient.delivery, 訂購商品: item.name, 數量: item.quantity, 金額: item.amount, 獲利: item.profit })));
+    const shipmentSheet = XLSX.utils.json_to_sheet(shipmentRows.length ? shipmentRows : [{ 提示: '目前沒有發貨資料' }]);
+    shipmentSheet['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(workbook, shipmentSheet, '發貨清單');
     for (const { market, rows } of marketSummaries(true)) {
-      const data = rows.map((row) => ({ 商品品項: row.product.name, 訂購總數量: row.quantity, 購買人數: row.buyers, 目前後台庫存: Number(row.product.stock) }));
-      const sheet = XLSX.utils.json_to_sheet(data); sheet['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 12 }, { wch: 16 }];
+      const data = rows.map((row) => ({ 商品品項: row.product.name, 訂購總數量: row.quantity, 單件成本: row.cost, 售價: row.price, 成本合計: row.totalCost, 銷售合計: row.revenue, 購買人數: row.buyers, 商品獲利: row.profit, 目前後台庫存: Number(row.product.stock) }));
+      const sheet = XLSX.utils.json_to_sheet(data); sheet['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 16 }];
       XLSX.utils.book_append_sheet(workbook, sheet, safeSheetName(market.name, usedNames));
     }
     XLSX.writeFile(workbook, `NewShop訂單-${new Date().toLocaleDateString('en-CA')}.xlsx`);
@@ -522,11 +606,11 @@ async function exportExcel() {
 }
 
 function bind() {
-  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => { state.view = button.dataset.view; if ((state.view === 'orders' || state.view === 'admin') && state.user) await Promise.all([loadOrders(), loadMarkets(), loadCustomers()]); render(); }));
+  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => { state.view = button.dataset.view; if ((state.view === 'orders' || state.view === 'admin') && state.user) { await Promise.all([loadOrders(), loadMarkets(), loadCustomers()]); await loadProductCosts(); } render(); }));
   document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => { const target = button.dataset.scroll; if (state.view !== 'shop') { state.view = 'shop'; render(); requestAnimationFrame(() => document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' })); } else document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' }); }));
   document.querySelectorAll('[data-open-market]').forEach((button) => button.addEventListener('click', () => openMarket(button.dataset.openMarket)));
   document.querySelectorAll('[data-select-item]').forEach((button) => button.addEventListener('click', () => { state.selectedProductId = button.dataset.selectItem; state.detailQty = 1; render(); }));
-  document.querySelectorAll('[data-detail-qty]').forEach((button) => button.addEventListener('click', () => { state.detailQty += Number(button.dataset.detailQty); render(); }));
+  document.querySelectorAll('[data-detail-qty]').forEach((button) => button.addEventListener('click', () => changeDetailQuantity(Number(button.dataset.detailQty))));
   document.querySelector('[data-action="add-selected-item"]')?.addEventListener('click', addSelectedItem);
   document.querySelector('[data-action="cart"]')?.addEventListener('click', () => { state.modal = 'cart'; render(); });
   document.querySelectorAll('[data-remove]').forEach((button) => button.addEventListener('click', () => { state.cart = state.cart.filter((item) => item.id !== button.dataset.remove); saveCart(); render(); }));
@@ -547,18 +631,20 @@ function bind() {
   document.querySelector('[data-action="view-orders"]')?.addEventListener('click', () => { state.modal = null; state.view = 'orders'; render(); });
   document.querySelector('[data-action="continue-shopping"]')?.addEventListener('click', () => { state.modal = null; state.view = 'shop'; render(); });
   document.querySelector('[data-action="export"]')?.addEventListener('click', exportExcel);
+  document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', () => { state.adminTab = button.dataset.adminTab; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
   document.querySelector('[data-action="new-customer"]')?.addEventListener('click', () => { state.customerDraft = null; state.modal = 'customer-editor'; render(); });
   document.querySelector('[data-action="create-customer"]')?.addEventListener('click', createCustomer);
   document.querySelectorAll('[data-save-customer]').forEach((button) => button.addEventListener('click', () => saveCustomer(button.dataset.saveCustomer)));
   document.querySelector('[data-action="new-market"]')?.addEventListener('click', () => openMarketEditor());
   document.querySelectorAll('[data-edit-market]').forEach((button) => button.addEventListener('click', () => openMarketEditor(button.dataset.editMarket)));
   document.querySelectorAll('[data-toggle-market]').forEach((button) => button.addEventListener('click', () => toggleMarket(button.dataset.toggleMarket)));
-  document.querySelector('[data-action="add-draft-item"]')?.addEventListener('click', () => { syncMarketDraftFromForm(); state.marketDraft.products.push({ key: crypto.randomUUID(), name: '', price: '', stock: 0, is_active: true, file: null, removeBg: false }); render(); });
+  document.querySelector('[data-action="add-draft-item"]')?.addEventListener('click', () => { syncMarketDraftFromForm(); state.marketDraft.products.push({ key: crypto.randomUUID(), name: '', cost: 0, price: '', stock: 0, is_active: true, file: null, removeBg: false }); render(); });
   document.querySelectorAll('[data-remove-draft-item]').forEach((button) => button.addEventListener('click', () => { syncMarketDraftFromForm(); state.marketDraft.products = state.marketDraft.products.filter((item) => item.key !== button.dataset.removeDraftItem); render(); }));
   document.querySelector('#market-image')?.addEventListener('change', () => { syncMarketDraftFromForm(); render(); });
   document.querySelectorAll('[data-item-image]').forEach((input) => input.addEventListener('change', () => { syncMarketDraftFromForm(); render(); }));
   document.querySelector('[data-action="save-market"]')?.addEventListener('click', saveMarket);
   document.querySelectorAll('[data-order-status]').forEach((select) => select.addEventListener('change', () => updateOrderStatus(select.dataset.orderStatus, select.value)));
+  document.querySelectorAll('[data-save-item-price]').forEach((button) => button.addEventListener('click', () => updateOrderItemPrice(button.dataset.saveItemPrice)));
 }
 
 render();
