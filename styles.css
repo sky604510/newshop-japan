@@ -283,9 +283,28 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
   .market-cover { height:230px; }
   .guide-grid { grid-template-columns:1fr; }
   .notice,.section-head,.editor-divider,footer { align-items:flex-start; flex-direction:column; }
-  .market-detail { grid-template-columns:1fr; }
-  .detail-media { min-height:260px; max-height:330px; }
-  .detail-copy { padding:25px 20px; }
+  .modal-backdrop { padding:8px; overflow:hidden; }
+  .market-detail { width:100%; height:calc(100dvh - 16px); max-height:calc(100dvh - 16px); grid-template-columns:minmax(118px,38%) minmax(0,62%); align-items:stretch; border-radius:24px; }
+  .market-detail .detail-close { top:10px; right:10px; width:38px; height:38px; }
+  .detail-media { min-width:0; min-height:0; height:100%; max-height:none; }
+  .detail-media img { object-fit:contain; }
+  .detail-media .market-pill { top:12px; left:10px; right:10px; max-width:calc(100% - 20px); padding:5px 7px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; }
+  .detail-copy { min-width:0; height:100%; padding:52px 12px 16px; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; }
+  .detail-copy .eyebrow { font-size:9px; letter-spacing:.11em; }
+  .detail-copy h2 { margin:6px 0; font-size:20px; line-height:1.25; overflow-wrap:anywhere; }
+  .detail-copy > p { margin-bottom:10px; font-size:12px; line-height:1.55; }
+  .detail-copy .deadline { padding:5px 8px; font-size:10px; }
+  .item-label { align-items:flex-start; gap:6px; margin:15px 0 8px; font-size:14px; }
+  .item-label small { max-width:90px; text-align:right; font-size:9px; }
+  .item-options { gap:7px; }
+  .item-option { grid-template-columns:minmax(0,1fr); gap:2px; padding:10px; border-radius:12px; }
+  .item-option span { font-size:13px; overflow-wrap:anywhere; }
+  .item-option strong { font-size:13px; }
+  .item-option small { font-size:10px; }
+  .detail-buy { align-items:stretch; flex-direction:column; gap:12px; margin:16px 0 12px; padding-top:13px; }
+  .detail-total { text-align:left; }
+  .detail-total strong { font-size:18px; }
+  .add-cart-wide { padding:11px 9px; font-size:13px; }
   .admin-stats { grid-template-columns:1fr 1fr; }
   .admin-tabs { top:8px; grid-template-columns:1fr 1fr; }
   .stat:last-child { grid-column:span 2; }
