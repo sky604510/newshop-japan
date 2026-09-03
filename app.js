@@ -31,10 +31,15 @@ const saveCheckoutDraft = () => localStorage.setItem('newshop_checkout_draft', J
 const dateValue = (value) => value ? new Date(value).toLocaleDateString('en-CA') : '';
 const isClosed = (market) => Boolean(market?.closes_at && new Date(market.closes_at) < new Date());
 const deliverySelect = (selected = '面交取貨') => deliveryOptions.map((option) => `<option value="${esc(option)}" ${option === selected ? 'selected' : ''}>${esc(option)}</option>`).join('');
+let toastTimer = null;
 
 function renderToast(message) {
-  state.toast = message; render();
-  window.setTimeout(() => { state.toast = ''; render(); }, 2600);
+  state.toast = message;
+  let toast = document.querySelector('.toast');
+  if (!toast) { toast = document.createElement('div'); toast.className = 'toast'; document.body.appendChild(toast); }
+  toast.textContent = message;
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { state.toast = ''; document.querySelector('.toast')?.remove(); }, 2600);
 }
 
 function friendlyError(error) {
@@ -53,7 +58,7 @@ function normalizeMarkets(markets) {
     ...market,
     products: (market.products || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
     emoji: ['🎀', '🌸', '🍭', '🪞', '💝'][marketIndex % 5],
-  })).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || new Date(a.created_at) - new Date(b.created_at));
+  })).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
 function syncCartWithProducts() {
@@ -72,12 +77,12 @@ function syncCartWithProducts() {
 async function loadMarkets() {
   let marketQuery = await supabase.from('markets')
     .select('id,slug,name,description,image_url,is_active,sort_order,closes_at,created_at,products(id,market_id,name,description,price,image_url,stock,is_active,created_at)')
-    .order('sort_order').order('created_at');
+    .order('created_at', { ascending: false });
   if (marketQuery.error && /closes_at/i.test(marketQuery.error.message || '')) {
     state.operationsReady = false;
     marketQuery = await supabase.from('markets')
       .select('id,slug,name,description,image_url,is_active,sort_order,created_at,products(id,market_id,name,description,price,image_url,stock,is_active,created_at)')
-      .order('sort_order').order('created_at');
+      .order('created_at', { ascending: false });
   }
 
   if (!marketQuery.error) {
@@ -189,6 +194,9 @@ supabase.auth.onAuthStateChange((event, session) => window.setTimeout(() => {
   if (event === 'PASSWORD_RECOVERY') {
     state.user = session?.user || null; state.modal = 'new-password'; render(); return;
   }
+  if (state.user?.id && state.user.id === session?.user?.id && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) {
+    state.user = session.user; return;
+  }
   syncSession(session);
 }, 0));
 
@@ -247,8 +255,18 @@ function marketSummaries(includeZero = false) {
   })).filter((entry) => includeZero || entry.rows.length);
 }
 
+function procurementSubtotalRow(rows) {
+  const quantity = rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+  const foreignTotal = rows.reduce((sum, row) => sum + Number(row.product.foreign_cost || 0) * Number(row.quantity), 0);
+  const rates = rows.map((row) => Number(row.product.exchange_rate || 0)).filter((rate) => rate > 0);
+  const averageRate = rates.length ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : 0;
+  const buyers = rows.reduce((sum, row) => sum + Number(row.buyers), 0);
+  const profit = rows.reduce((sum, row) => sum + Number(row.profit), 0);
+  return `<tfoot><tr class="procurement-subtotal"><td></td><td><strong>小計</strong></td><td><strong>${quantity}</strong></td><td>${foreignTotal.toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td><td>${averageRate.toLocaleString('zh-TW', { maximumFractionDigits: 4 })}</td><td>—</td><td>—</td><td><strong>${buyers}</strong></td><td class="profit ${profit < 0 ? 'negative' : ''}"><strong>${money(profit)}</strong></td></tr></tfoot>`;
+}
+
 function latestCustomerOrder(customer) {
-  return state.orders.find((order) => order.customer_id === customer.id || (!order.customer_id && order.phone === customer.phone));
+  return state.orders.find((order) => order.customer_id === customer.id || (!order.customer_id && customer.phone && order.phone === customer.phone));
 }
 
 function shipmentSummaries() {
@@ -273,7 +291,8 @@ function shipmentSummaries() {
 
 function orderItemEditor(item) {
   const adjusted = item.original_unit_price != null;
-  return `<div class="order-item-admin ${adjusted ? 'price-adjusted' : ''}"><strong>${esc(item.product_name)}</strong><div class="item-admin-controls"><label>數量<input data-order-item-quantity="${item.id}" type="number" min="0" step="1" value="${item.quantity}" title="輸入 0 會刪除此品項" ${state.adminOpsReady ? '' : 'disabled'}/></label><button data-save-item-quantity="${item.id}" ${state.adminOpsReady ? '' : 'disabled'}>改數量</button><label>單價<input data-order-item-price="${item.id}" type="number" min="0" value="${Number(item.unit_price)}" ${state.pricingReady ? '' : 'disabled'}/></label><button data-save-item-price="${item.id}" ${state.pricingReady ? '' : 'disabled'}>改金額</button></div>${adjusted ? `<small>人工改價・原價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
+  const product = state.products.find((entry) => entry.id === item.product_id); const market = state.markets.find((entry) => entry.id === item.market_id || entry.id === product?.market_id); const image = product?.image_url || market?.image_url;
+  return `<div class="order-item-admin ${adjusted ? 'price-adjusted' : ''}"><div class="order-item-identity"><span class="order-item-thumb">${image ? `<img src="${esc(image)}" alt="" loading="lazy"/>` : 'IMG'}</span><span><strong>${esc(item.product_name)}</strong><small>${esc(market?.name || '未分類賣場')}</small></span></div><div class="item-admin-controls"><label>數量<input data-order-item-quantity="${item.id}" type="number" min="0" step="1" value="${item.quantity}" title="輸入 0 會刪除此品項" ${state.adminOpsReady ? '' : 'disabled'}/></label><button data-save-item-quantity="${item.id}" ${state.adminOpsReady ? '' : 'disabled'}>改數量</button><label>單價<input data-order-item-price="${item.id}" type="number" min="0" value="${Number(item.unit_price)}" ${state.pricingReady ? '' : 'disabled'}/></label><button data-save-item-price="${item.id}" ${state.pricingReady ? '' : 'disabled'}>改金額</button></div>${adjusted ? `<small>人工改價・原價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
 }
 
 function adminView() {
@@ -281,18 +300,21 @@ function adminView() {
   const total = state.orders.filter((order) => order.status !== 'cancelled').reduce((sum, order) => sum + Number(order.total_amount), 0);
   const statusOptions = (current) => Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`).join('');
   const viewingOrders = state.orders.filter((order) => state.adminOrderHistory ? ['completed', 'cancelled'].includes(order.status) : !['completed', 'cancelled'].includes(order.status));
-  const orderRows = viewingOrders.map((order) => `<tr><td>${esc(order.order_number)}<small class="account-email">${esc(order.account_email || '帳號未記錄')}</small></td><td>${esc(order.recipient_name)}<br/><small>${esc(order.phone)}・${esc(order.delivery_method)}</small></td><td>${(order.order_items || []).map(orderItemEditor).join('')}</td><td>${money(order.total_amount)}</td><td><select data-order-status="${order.id}">${statusOptions(order.status)}</select></td><td><button class="btn btn-danger-soft" data-delete-order="${order.id}" ${state.adminOpsReady ? '' : 'disabled'}>刪除</button></td></tr>`).join('');
+  const orderRows = viewingOrders.map((order) => `<tr><td>${esc(order.order_number)}<small class="account-email">${esc(order.account_email || '帳號未記錄')}</small></td><td>${esc(order.recipient_name)}<br/><small>${order.phone ? `${esc(order.phone)}・` : ''}${esc(order.delivery_method)}</small></td><td>${(order.order_items || []).map(orderItemEditor).join('')}</td><td>${money(order.total_amount)}</td><td><select data-order-status="${order.id}">${statusOptions(order.status)}</select></td><td><button class="btn btn-danger-soft" data-delete-order="${order.id}" ${state.adminOpsReady ? '' : 'disabled'}>刪除</button></td></tr>`).join('');
   const marketRows = state.markets.map((market) => { const cover = market.image_url || market.products.find((item) => item.image_url)?.image_url; return `<tr><td><div class="admin-market"><span class="admin-thumb">${cover ? `<img src="${esc(cover)}" alt=""/>` : market.emoji}</span><span><strong>${esc(market.name)}</strong><small>${market.is_active ? '已上架' : '已下架'}・${market.closes_at ? `收單 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}` : '未設定期限'}</small></span></div></td><td>${market.products.length}</td><td>${market.products.reduce((sum, item) => sum + Number(item.stock), 0)}</td><td><div class="admin-actions"><button class="btn btn-light" data-edit-market="${market.id}">編輯</button><button class="btn ${market.is_active ? 'btn-danger-soft' : 'btn-accent'}" data-toggle-market="${market.id}">${market.is_active ? '下架' : '上架'}</button></div></td></tr>`; }).join('');
-  const customerRows = state.customers.map((customer) => { const latest = latestCustomerOrder(customer); const latestItem = latest ? (latest.order_items || []).map((item) => item.product_name).join('、') : '尚未下單'; return `<tr data-customer-row="${customer.id}"><td><input data-customer-name value="${esc(customer.recipient_name)}"/><small>${esc(customer.email || '未綁定會員信箱')}</small></td><td><input data-customer-phone value="${esc(customer.phone)}"/></td><td><select data-customer-delivery>${deliverySelect(customer.delivery_method)}</select></td><td>${esc(latestItem)}${latest ? `<small>${new Date(latest.created_at).toLocaleDateString('zh-TW')}</small>` : ''}</td><td class="customer-flag"><input data-customer-regular type="checkbox" aria-label="常客" ${customer.is_regular ? 'checked' : ''}/></td><td class="customer-flag vip"><input data-customer-vip type="checkbox" aria-label="VIP" ${customer.is_vip ? 'checked' : ''}/></td><td><input data-customer-note value="${esc(customer.admin_note)}" placeholder="內部備註"/></td><td><div class="admin-actions"><button class="btn btn-light" data-save-customer="${customer.id}">儲存</button><button class="btn btn-danger-soft" data-delete-customer="${customer.id}">刪除</button></div></td></tr>`; }).join('');
+  const customerRows = state.customers.map((customer) => { const latest = latestCustomerOrder(customer); const latestItem = latest ? (latest.order_items || []).map((item) => item.product_name).join('、') : '尚未下單'; return `<tr data-customer-row="${customer.id}"><td><input data-customer-name value="${esc(customer.recipient_name)}"/></td><td><input data-customer-email type="email" value="${esc(customer.email || '')}" placeholder="選填"/></td><td><input data-customer-phone value="${esc(customer.phone || '')}" placeholder="選填"/></td><td><select data-customer-delivery>${deliverySelect(customer.delivery_method)}</select></td><td>${esc(latestItem)}${latest ? `<small>${new Date(latest.created_at).toLocaleDateString('zh-TW')}</small>` : ''}</td><td class="customer-flag"><input data-customer-regular type="checkbox" aria-label="常客" ${customer.is_regular ? 'checked' : ''}/></td><td class="customer-flag vip"><input data-customer-vip type="checkbox" aria-label="VIP" ${customer.is_vip ? 'checked' : ''}/></td><td><input data-customer-note value="${esc(customer.admin_note)}" placeholder="內部備註"/></td><td><div class="admin-actions"><button class="btn btn-light" data-save-customer="${customer.id}">儲存</button><button class="btn btn-danger-soft" data-delete-customer="${customer.id}">刪除</button></div></td></tr>`; }).join('');
   const summaries = marketSummaries().map((entry) => ({ ...entry, rows: entry.rows.filter((row) => row.procured === state.procurementHistory) })).filter((entry) => entry.rows.length);
+  const visibleSummaryRows = summaries.flatMap((entry) => entry.rows);
+  const summaryQuantity = visibleSummaryRows.reduce((sum, row) => sum + row.quantity, 0);
+  const summaryProfit = visibleSummaryRows.reduce((sum, row) => sum + row.profit, 0);
   const shipments = shipmentSummaries();
-  const shipmentRows = shipments.map((recipient) => `<tr><td><strong>${esc(recipient.recipient)}</strong><small>${esc(recipient.account)}</small><small>${esc(recipient.phone)}・${esc(recipient.delivery)}</small></td><td><div class="shipment-items">${recipient.items.map((item) => `<div class="shipment-item"><span class="shipment-thumb">${item.image_url ? `<img src="${esc(item.image_url)}" alt="" loading="lazy"/>` : '<span>IMG</span>'}</span><span><strong>${esc(item.name)}</strong><small>× ${item.quantity}</small></span></div>`).join('')}</div></td><td>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</td><td>${money(recipient.amount)}</td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}">${money(recipient.profit)}</td></tr>`).join('');
-  const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td>${esc(row.product.name)}</td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody></table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
+  const shipmentRows = shipments.map((recipient) => `<tr><td><strong>${esc(recipient.recipient)}</strong><small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small></td><td><div class="shipment-items">${recipient.items.map((item) => `<div class="shipment-item"><span class="shipment-thumb">${item.image_url ? `<img src="${esc(item.image_url)}" alt="" loading="lazy"/>` : '<span>IMG</span>'}</span><span><strong>${esc(item.name)}</strong><small>× ${item.quantity}</small></span></div>`).join('')}</div></td><td>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</td><td>${money(recipient.amount)}</td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}">${money(recipient.profit)}</td></tr>`).join('');
+  const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><span class="procurement-thumb">${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : market.image_url ? `<img src="${esc(market.image_url)}" alt="" loading="lazy"/>` : 'IMG'}</span><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}`;
   const orderPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史清單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
-  const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div><div class="summary-grid">${summaryHtml}</div></section>`;
+  const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div><div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div></section>`;
   const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整帳號、商品與有效訂單。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div>${shipments.length ? `<div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂購商品</th><th>總數量</th><th>金額</th><th>獲利</th></tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">目前沒有待整理的發貨資料</div>`}</section>`;
-  const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>管理常客、VIP 與內部備註。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>電話</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
+  const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>只有收件人為必填，信箱與電話皆可留空。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>信箱（選填）</th><th>電話（選填）</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
   const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>管理封面、截止日、商品成本、售價與庫存。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody>${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
   const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, customers: customerPanel, markets: marketPanel };
   return `<main class="admin-page">${migrationNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
@@ -312,7 +334,7 @@ function marketDetailModal() {
 }
 
 function cartModal() {
-  return `<div class="modal-backdrop"><div class="modal cart-modal"><div class="modal-head"><div><span class="eyebrow">YOUR CART</span><h2>購物車</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="cart-line" data-cart-line="${item.id}"><div><small>${esc(item.market_name || '零售區')}</small><strong>${esc(item.name)}</strong><div class="cart-subtotal" data-cart-subtotal="${item.id}">${money(Number(item.price) * item.qty)}</div></div><div class="cart-controls"><button data-cart-change="${item.id}" data-delta="-1">−</button><strong data-cart-qty="${item.id}">${item.qty}</strong><button data-cart-change="${item.id}" data-delta="1" ${item.qty >= item.stock ? 'disabled' : ''}>＋</button><button class="remove-link" data-remove="${item.id}">移除</button></div></div>`).join('')}<div class="cart-total"><strong>商品合計</strong><strong data-cart-total>${money(cartTotal())}</strong></div><p class="cart-note">最終付款與取貨資訊由店主確認。</p><button class="btn btn-primary add-cart-wide" data-action="begin-checkout">前往結帳</button>` : `<div class="empty">購物車還是空的</div>`}</div></div>`;
+  return `<div class="modal-backdrop"><div class="modal cart-modal"><div class="modal-head"><div><span class="eyebrow">YOUR CART</span><h2>購物車</h2></div><button class="close" data-action="close">×</button></div>${state.cart.length ? `${state.cart.map((item) => `<div class="cart-line" data-cart-line="${item.id}"><div><small>${esc(item.market_name || '零售區')}</small><strong>${esc(item.name)}</strong><div class="cart-subtotal" data-cart-subtotal="${item.id}">${money(Number(item.price) * item.qty)}</div></div><div class="cart-controls"><button data-cart-change="${item.id}" data-delta="-1">−</button><strong data-cart-qty="${item.id}">${item.qty}</strong><button data-cart-change="${item.id}" data-delta="1" ${item.qty >= item.stock ? 'disabled' : ''}>＋</button><button class="remove-link" data-remove="${item.id}">移除</button></div></div>`).join('')}<div class="cart-total"><strong>商品合計</strong><strong data-cart-total>${money(cartTotal())}</strong></div><p class="cart-note">最終付款與取貨資訊由店主確認。</p><div class="cart-actions"><button class="btn btn-light" data-action="continue-shopping">繼續購物</button><button class="btn btn-primary" data-action="begin-checkout">前往結帳</button></div>` : `<div class="empty">購物車還是空的</div>`}</div></div>`;
 }
 
 function authModal() {
@@ -324,13 +346,13 @@ function forgotPasswordModal() { return `<div class="modal-backdrop"><div class=
 function newPasswordModal() { return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">NEW PASSWORD</span><h2>設定新密碼</h2></div></div><div class="field"><label>新密碼</label><input id="new-password" type="password" autocomplete="new-password" /></div><div class="field"><label>再次輸入</label><input id="confirm-password" type="password" autocomplete="new-password" /></div><button class="btn btn-primary add-cart-wide" data-action="update-password">更新密碼</button></div></div>`; }
 function checkoutModal() {
   const draft = state.checkoutDraft || {}; const regulars = state.customers.filter((customer) => customer.is_regular);
-  const adminModes = isManager() ? `<div class="auth-tabs"><button class="${state.checkoutMode === 'general' ? 'active' : ''}" data-checkout-mode="general">一般模式</button><button class="${state.checkoutMode === 'regular' ? 'active' : ''}" data-checkout-mode="regular">常客代下單</button></div>${state.checkoutMode === 'regular' ? `<div class="field"><label>選擇常客</label><select id="regular-customer"><option value="">請選擇</option>${regulars.map((customer) => `<option value="${customer.id}" ${draft.customerId === customer.id ? 'selected' : ''}>${esc(customer.recipient_name)}・${esc(customer.phone)}${customer.is_vip ? '・VIP' : ''}</option>`).join('')}</select></div>` : ''}` : '';
-  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">CHECKOUT</span><h2>確認訂單</h2></div><button class="close" data-action="close">×</button></div>${adminModes}<div class="field"><label>收件人</label><input id="customer" autocomplete="name" value="${esc(draft.recipient || '')}" /></div><div class="field"><label>聯絡電話</label><input id="phone" autocomplete="tel" value="${esc(draft.phone || '')}" /></div><div class="field"><label>取貨方式</label><select id="delivery">${deliverySelect(draft.delivery || '面交取貨')}</select></div><div class="field"><label>訂單備註</label><input id="note" value="${esc(draft.note || '')}" placeholder="顏色、尺寸或其他需求（選填）" /></div><p class="draft-hint">輸入內容會自動保存在這台裝置，切換分頁也不會消失。</p><button class="btn btn-primary add-cart-wide" data-action="checkout" ${state.busy ? 'disabled' : ''}>${state.busy ? '送出中…' : `${state.checkoutMode === 'regular' ? '代客送出訂單' : '送出訂單'} ・ ${money(cartTotal())}`}</button></div></div>`;
+  const adminModes = isManager() ? `<div class="auth-tabs"><button class="${state.checkoutMode === 'general' ? 'active' : ''}" data-checkout-mode="general">一般模式</button><button class="${state.checkoutMode === 'regular' ? 'active' : ''}" data-checkout-mode="regular">常客代下單</button></div>${state.checkoutMode === 'regular' ? `<div class="field"><label>選擇常客</label><select id="regular-customer"><option value="">請選擇</option>${regulars.map((customer) => `<option value="${customer.id}" ${draft.customerId === customer.id ? 'selected' : ''}>${esc(customer.recipient_name)}${customer.phone ? `・${esc(customer.phone)}` : ''}${customer.is_vip ? '・VIP' : ''}</option>`).join('')}</select></div>` : ''}` : '';
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">CHECKOUT</span><h2>確認訂單</h2></div><button class="close" data-action="close">×</button></div>${adminModes}<div class="field"><label>收件人（必填）</label><input id="customer" autocomplete="name" value="${esc(draft.recipient || '')}" /></div><div class="field"><label>聯絡電話（選填）</label><input id="phone" autocomplete="tel" value="${esc(draft.phone || '')}" /></div><div class="field"><label>取貨方式</label><select id="delivery">${deliverySelect(draft.delivery || '面交取貨')}</select></div><div class="field"><label>訂單備註</label><input id="note" value="${esc(draft.note || '')}" placeholder="顏色、尺寸或其他需求（選填）" /></div><p class="draft-hint">輸入內容會自動保存在這台裝置，切換分頁也不會消失。</p><button class="btn btn-primary add-cart-wide" data-action="checkout" ${state.busy ? 'disabled' : ''}>${state.busy ? '送出中…' : `${state.checkoutMode === 'regular' ? '代客送出訂單' : '送出訂單'} ・ ${money(cartTotal())}`}</button></div></div>`;
 }
 
 function customerEditorModal() {
   const draft = state.customerDraft || { recipient_name: '', phone: '', delivery_method: '面交取貨', email: '', is_regular: true, is_vip: false, admin_note: '' };
-  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">REGULAR CUSTOMER</span><h2>新增常客</h2></div><button class="close" data-action="close">×</button></div><div class="field"><label>收件人</label><input id="new-customer-name" value="${esc(draft.recipient_name)}"/></div><div class="field"><label>聯絡電話</label><input id="new-customer-phone" value="${esc(draft.phone)}"/></div><div class="field"><label>Email（選填）</label><input id="new-customer-email" type="email" value="${esc(draft.email)}"/></div><div class="field"><label>取貨方式</label><select id="new-customer-delivery">${deliverySelect(draft.delivery_method)}</select></div><div class="field"><label>管理員備註</label><input id="new-customer-note" value="${esc(draft.admin_note)}" placeholder="例：偏好、需留意事項"/></div><div class="tag-options"><label class="check-field"><input id="new-customer-regular" type="checkbox" checked/><span>加入常客清單</span></label><label class="check-field"><input id="new-customer-vip" type="checkbox"/><span>VIP 客戶</span></label></div><button class="btn btn-primary add-cart-wide" data-action="create-customer">建立常客</button></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">REGULAR CUSTOMER</span><h2>新增常客</h2></div><button class="close" data-action="close">×</button></div><div class="field"><label>收件人（必填）</label><input id="new-customer-name" value="${esc(draft.recipient_name)}"/></div><div class="field"><label>聯絡電話（選填）</label><input id="new-customer-phone" value="${esc(draft.phone)}"/></div><div class="field"><label>Email（選填）</label><input id="new-customer-email" type="email" value="${esc(draft.email)}"/></div><div class="field"><label>取貨方式</label><select id="new-customer-delivery">${deliverySelect(draft.delivery_method)}</select></div><div class="field"><label>管理員備註</label><input id="new-customer-note" value="${esc(draft.admin_note)}" placeholder="例：偏好、需留意事項"/></div><div class="tag-options"><label class="check-field"><input id="new-customer-regular" type="checkbox" ${draft.is_regular !== false ? 'checked' : ''}/><span>加入常客清單</span></label><label class="check-field"><input id="new-customer-vip" type="checkbox" ${draft.is_vip ? 'checked' : ''}/><span>VIP 客戶</span></label></div><button class="btn btn-primary add-cart-wide" data-action="create-customer">建立常客</button></div></div>`;
 }
 function successModal() { const order = state.lastOrder; return `<div class="modal-backdrop"><div class="modal success-modal"><div class="success-mark">✓</div><span class="eyebrow">ORDER RECEIVED</span><h2>訂單已成功送出</h2><p>我們會盡快確認採購內容。</p><div class="success-order"><span>訂單編號</span><strong>${esc(order?.order_number || '處理中')}</strong><span>下單帳號</span><strong>${esc(order?.account_email || state.user?.email || '未記錄')}</strong><span>商品金額</span><strong>${money(order?.total_amount || 0)}</strong></div><button class="btn btn-primary add-cart-wide" data-action="view-orders">查看我的訂單</button><button class="forgot-link" data-action="continue-shopping">繼續逛逛</button></div></div>`; }
 
@@ -347,7 +369,7 @@ function createMarketDraft(market) {
 function marketEditorModal() {
   const draft = state.marketDraft || createMarketDraft();
   const rows = draft.products.map((item, index) => `<div class="item-editor compact-item" data-item-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><span class="item-index">${index + 1}</span><label class="compact-input item-name"><span>商品名稱</span><input data-item-name value="${esc(item.name || '')}" placeholder="商品或規格名稱"/></label><label class="compact-input"><span>外幣成本</span><input data-item-foreign-cost type="number" min="0" step="0.01" value="${item.foreign_cost ?? 0}"/></label><label class="compact-input"><span>匯率</span><input data-item-exchange-rate type="number" min="0" step="0.0001" value="${item.exchange_rate ?? 0}"/></label><label class="compact-input"><span>成本</span><input data-item-cost type="number" min="0" step="0.01" value="${item.cost ?? 0}"/></label><label class="compact-input"><span>售價</span><input data-item-price type="number" min="0" value="${item.price ?? ''}"/></label><label class="compact-input"><span>數量</span><input data-item-stock type="number" min="0" step="1" value="${item.stock ?? 0}"/></label><div class="compact-image"><span class="upload-thumb">${item.file ? `<img src="${URL.createObjectURL(item.file)}" alt="預覽"/>` : item.image_url ? `<img src="${esc(item.image_url)}" alt="預覽"/>` : 'IMG'}</span><label class="image-pick" title="選擇商品圖片">＋<input data-item-image type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><label class="remove-bg-mini" title="自動去除淺色背景"><input data-item-remove-bg type="checkbox" ${item.removeBg ? 'checked' : ''}/>去背</label></div><label class="mini-switch"><input data-item-active type="checkbox" ${item.is_active !== false ? 'checked' : ''}/><span>上架</span></label>${item.id ? '<span class="saved-item">已儲存</span>' : `<button class="item-delete" data-remove-draft-item="${esc(item.key)}" title="移除品項">×</button>`}</div>`).join('');
-  return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="market-basic-grid"><div class="field"><label>賣場名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購"/></div><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="2">${esc(draft.description)}</textarea></div><div class="market-cover-compact"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : 'COVER'}</span><label class="btn btn-light image-button">選擇封面<input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去背</label><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>立即上架</span></label></div><div class="editor-divider"><div><strong>商品／規格</strong><small>同一列完成名稱、成本、售價、數量與圖片</small></div><button class="btn btn-light" data-action="add-draft-item">＋ 新增選項</button></div><div class="item-editors compact-list">${rows || `<div class="empty">請先新增至少一個商品</div>`}</div><div class="editor-save-bar"><span>共 ${draft.products.length} 個商品</span><button class="btn btn-primary" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與商品'}</button></div></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="market-basic-grid"><div class="field"><label>賣場名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購"/></div><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="2">${esc(draft.description)}</textarea></div><div class="market-cover-compact"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : 'COVER'}</span><label class="btn btn-light image-button">選擇封面<input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去背</label><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>立即上架</span></label></div><div class="editor-divider"><div><strong>商品／規格</strong><small>同一列完成名稱、成本、售價、數量與圖片</small></div><button class="btn btn-light" data-action="add-draft-item">＋ 新增選項</button></div><div class="item-editors compact-list">${rows || `<div class="empty">請先新增至少一個商品</div>`}</div><div class="editor-save-bar"><span>共 ${draft.products.length} 個商品</span><div class="editor-save-actions"><button class="btn btn-light" data-action="cancel-market">取消</button><button class="btn btn-primary" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與商品'}</button></div></div></div></div>`;
 }
 
 function modal() {
@@ -363,11 +385,34 @@ function modal() {
   return '';
 }
 
+function captureOpenDraft() {
+  if (state.modal === 'market-editor' && document.querySelector('#market-name')) syncMarketDraftFromForm();
+  if (state.modal === 'checkout' && document.querySelector('#customer')) persistCheckoutDraft();
+  if (state.modal === 'customer-editor' && document.querySelector('#new-customer-name')) {
+    state.customerDraft = {
+      recipient_name: document.querySelector('#new-customer-name')?.value || '', phone: document.querySelector('#new-customer-phone')?.value || '',
+      email: document.querySelector('#new-customer-email')?.value || '', delivery_method: document.querySelector('#new-customer-delivery')?.value || '面交取貨',
+      admin_note: document.querySelector('#new-customer-note')?.value || '', is_regular: Boolean(document.querySelector('#new-customer-regular')?.checked), is_vip: Boolean(document.querySelector('#new-customer-vip')?.checked),
+    };
+  }
+}
+
 function render() {
+  const keepModalStable = Boolean(state.modal && document.querySelector('.modal-backdrop'));
+  const suppressRerenderMotion = Boolean(document.querySelector('#app')?.children.length);
+  const previousModalScroll = document.querySelector('.modal')?.scrollTop || 0;
+  const previousDetailScroll = document.querySelector('.detail-copy')?.scrollTop || 0;
+  captureOpenDraft();
+  if (suppressRerenderMotion) document.body.classList.add('suppress-modal-motion');
   const content = state.view === 'shop' ? shop() : state.view === 'orders' ? ordersView() : adminView();
   document.querySelector('#app').innerHTML = `<div class="shell">${nav()}${content}${footer()}</div>${state.modal ? modal() : ''}${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ''}`;
   document.body.classList.toggle('modal-open', Boolean(state.modal));
   bind();
+  const nextModal = document.querySelector('.modal');
+  const nextDetail = document.querySelector('.detail-copy');
+  if (keepModalStable && nextModal) nextModal.scrollTop = previousModalScroll;
+  if (keepModalStable && nextDetail) nextDetail.scrollTop = previousDetailScroll;
+  if (suppressRerenderMotion) requestAnimationFrame(() => document.body.classList.remove('suppress-modal-motion'));
 }
 
 function bindModalScroll() {
@@ -389,6 +434,18 @@ function bindModalScroll() {
     const nextY = event.touches[0].clientY; scrollTarget.scrollTop += touchY - nextY; touchY = nextY; event.preventDefault();
   }, { passive: false });
   backdrop.addEventListener('touchend', () => { touchY = null; }, { passive: true });
+}
+
+function previewSelectedImage(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const preview = input.closest('.market-cover-compact, .compact-image')?.querySelector('.upload-thumb');
+  if (!preview) return;
+  const image = document.createElement('img');
+  image.src = URL.createObjectURL(file); image.alt = '圖片預覽';
+  image.addEventListener('load', () => URL.revokeObjectURL(image.src), { once: true });
+  preview.replaceChildren(image);
+  syncMarketDraftFromForm();
 }
 
 function openMarket(id) {
@@ -449,7 +506,7 @@ function addSelectedItem() {
   if (nextQty > product.stock) { renderToast('已達目前可購買庫存'); return; }
   if (existing) existing.qty = nextQty;
   else state.cart.push({ id: product.id, product_id: product.id, market_id: product.market_id, market_name: product.market_name, name: product.name, price: Number(product.price), qty: state.detailQty, stock: product.stock });
-  saveCart(); state.modal = 'cart'; renderToast(`${product.name} 已加入購物車`);
+  saveCart(); state.modal = 'cart'; render(); renderToast(`${product.name} 已加入購物車`);
 }
 
 function changeCartQuantity(id, delta) {
@@ -480,35 +537,35 @@ async function signup() {
   if (!email || password.length < 6) { renderToast('請填寫 Email 及至少 6 個字元的密碼'); return; }
   state.busy = true; render();
   const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: `${window.location.origin}${window.location.pathname}` } });
-  state.busy = false; if (error) { renderToast(friendlyError(error)); return; }
-  state.modal = null; renderToast(data.session ? '註冊成功，已登入會員' : '註冊成功，請到信箱點擊驗證連結');
+  state.busy = false; if (error) { render(); renderToast(friendlyError(error)); return; }
+  state.modal = null; render(); renderToast(data.session ? '註冊成功，已登入會員' : '註冊成功，請到信箱點擊驗證連結');
 }
 
 async function login() {
   const email = document.querySelector('#email')?.value.trim(); const password = document.querySelector('#password')?.value || '';
   if (!email || !password) { renderToast('請填寫信箱與密碼'); return; }
   state.busy = true; render(); const { error } = await supabase.auth.signInWithPassword({ email, password }); state.busy = false;
-  if (error) { renderToast(friendlyError(error)); return; }
-  state.modal = null; state.view = 'orders'; renderToast('登入成功');
+  if (error) { render(); renderToast(friendlyError(error)); return; }
+  state.modal = null; state.view = 'orders'; render(); renderToast('登入成功');
 }
 
 async function sendRecovery() {
   const email = document.querySelector('#recover-email')?.value.trim(); if (!email) return;
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}${window.location.pathname}` });
-  if (error) { renderToast(friendlyError(error)); return; } state.modal = null; renderToast('重設信已寄出，請檢查 Email');
+  if (error) { renderToast(friendlyError(error)); return; } state.modal = null; render(); renderToast('重設信已寄出，請檢查 Email');
 }
 
 async function updatePassword() {
   const password = document.querySelector('#new-password')?.value || ''; const confirmation = document.querySelector('#confirm-password')?.value || '';
   if (password.length < 6 || password !== confirmation) { renderToast('請確認兩次輸入的密碼相同，且至少 6 個字元'); return; }
   const { error } = await supabase.auth.updateUser({ password }); if (error) { renderToast(friendlyError(error)); return; }
-  state.modal = null; state.view = 'orders'; renderToast('密碼更新成功');
+  state.modal = null; state.view = 'orders'; render(); renderToast('密碼更新成功');
 }
 
 async function checkout() {
   const recipient = document.querySelector('#customer')?.value.trim(); const phone = document.querySelector('#phone')?.value.trim();
   const delivery = document.querySelector('#delivery')?.value; const note = document.querySelector('#note')?.value.trim() || '';
-  if (!recipient || !phone) { renderToast('請填寫收件人與電話'); return; }
+  if (!recipient) { renderToast('請填寫收件人'); return; }
   if (state.checkoutMode === 'regular' && !state.checkoutDraft.customerId) { renderToast('請先選擇常客'); return; }
   state.busy = true; render();
   const items = state.cart.map((item) => ({ product_id: item.product_id, quantity: item.qty }));
@@ -516,7 +573,7 @@ async function checkout() {
     ? supabase.rpc('admin_place_order', { p_customer_id: state.checkoutMode === 'regular' ? state.checkoutDraft.customerId : null, p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: items })
     : supabase.rpc('place_order', { p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: items });
   const { data: orderId, error } = await request;
-  state.busy = false; if (error) { renderToast(friendlyError(error)); return; }
+  state.busy = false; if (error) { render(); renderToast(friendlyError(error)); return; }
   state.cart = []; saveCart(); state.checkoutDraft = {}; saveCheckoutDraft(); state.checkoutMode = 'general'; state.view = 'orders'; await Promise.all([loadOrders(), loadMarkets(), loadCustomers()]);
   state.lastOrder = state.orders.find((order) => order.id === orderId) || state.orders[0] || null; state.modal = 'success'; render();
 }
@@ -614,13 +671,13 @@ async function saveMarket() {
 async function toggleMarket(id) {
   const market = state.markets.find((item) => item.id === id); if (!market) return;
   const { error } = await supabase.from('markets').update({ is_active: !market.is_active }).eq('id', id);
-  if (error) { renderToast(friendlyError(error)); return; } await loadMarkets(); renderToast(market.is_active ? '賣場已下架' : '賣場已上架');
+  if (error) { renderToast(friendlyError(error)); return; } await loadMarkets(); render(); renderToast(market.is_active ? '賣場已下架' : '賣場已上架');
 }
 
 async function updateOrderStatus(id, status) {
   if (!isManager() || !statusLabels[status]) return;
   const { error } = await supabase.from('orders').update({ status }).eq('id', id); if (error) { renderToast(friendlyError(error)); return; }
-  await loadOrders(); renderToast('訂單狀態已更新');
+  await loadOrders(); render(); renderToast('訂單狀態已更新');
 }
 
 async function updateOrderItemPrice(id) {
@@ -629,7 +686,7 @@ async function updateOrderItemPrice(id) {
   if (!Number.isFinite(price) || price < 0) { renderToast('請輸入正確的商品金額'); return; }
   const { error } = await supabase.rpc('admin_update_order_item_price', { p_order_item_id: id, p_unit_price: price });
   if (error) { renderToast(friendlyError(error)); return; }
-  await loadOrders(); renderToast('商品金額已更新，訂單總額已重新計算');
+  await loadOrders(); render(); renderToast('商品金額已更新，訂單總額已重新計算');
 }
 
 async function updateOrderItemQuantity(id) {
@@ -638,27 +695,27 @@ async function updateOrderItemQuantity(id) {
   if (!Number.isInteger(quantity) || quantity < 0) { renderToast('數量必須是 0 或正整數'); return; }
   const { error } = await supabase.rpc('admin_update_order_item_quantity', { p_order_item_id: id, p_quantity: quantity });
   if (error) { renderToast(friendlyError(error)); return; }
-  await Promise.all([loadOrders(), loadMarkets()]); await loadProductCosts(); renderToast(quantity === 0 ? '訂單品項已刪除，數量已補回庫存' : '商品數量與庫存已同步更新');
+  await Promise.all([loadOrders(), loadMarkets()]); await loadProductCosts(); render(); renderToast(quantity === 0 ? '訂單品項已刪除，數量已補回庫存' : '商品數量與庫存已同步更新');
 }
 
 async function deleteOrder(id) {
   if (!window.confirm('確定永久刪除這張訂單嗎？商品數量會補回庫存。')) return;
   const { error } = await supabase.rpc('admin_delete_order', { p_order_id: id });
   if (error) { renderToast(friendlyError(error)); return; }
-  await Promise.all([loadOrders(), loadMarkets()]); await loadProductCosts(); renderToast('訂單已刪除，庫存已補回');
+  await Promise.all([loadOrders(), loadMarkets()]); await loadProductCosts(); render(); renderToast('訂單已刪除，庫存已補回');
 }
 
 async function deleteCustomer(id) {
   if (!window.confirm('確定刪除這位購買人／常客嗎？既有訂單仍會保留。')) return;
   const { error } = await supabase.from('customers').delete().eq('id', id);
   if (error) { renderToast(friendlyError(error)); return; }
-  await loadCustomers(); renderToast('客戶資料已刪除');
+  await loadCustomers(); render(); renderToast('客戶資料已刪除');
 }
 
 async function toggleProcurement(productId, checked) {
   const { error } = await supabase.from('procurement_checks').upsert({ product_id: productId, is_purchased: checked, updated_by: state.user.id });
   if (error) { renderToast(friendlyError(error)); return; }
-  await loadProcurementChecks(); renderToast(checked ? '已標記採購完成' : '已移回待採購');
+  await loadProcurementChecks(); render(); renderToast(checked ? '已標記採購完成' : '已移回待採購');
 }
 
 async function createCustomer() {
@@ -671,17 +728,17 @@ async function createCustomer() {
     is_regular: Boolean(document.querySelector('#new-customer-regular')?.checked),
     is_vip: Boolean(document.querySelector('#new-customer-vip')?.checked),
   };
-  if (!payload.recipient_name || !payload.phone) { renderToast('請填寫常客姓名與電話'); return; }
+  if (!payload.recipient_name) { renderToast('請填寫常客姓名'); return; }
   const { error } = await supabase.from('customers').insert(payload); if (error) { renderToast(friendlyError(error)); return; }
-  await loadCustomers(); state.modal = null; renderToast('常客已建立');
+  await loadCustomers(); state.modal = null; state.customerDraft = null; render(); renderToast('常客已建立');
 }
 
 async function saveCustomer(id) {
   const row = document.querySelector(`[data-customer-row="${id}"]`); if (!row) return;
-  const payload = { recipient_name: row.querySelector('[data-customer-name]').value.trim(), phone: row.querySelector('[data-customer-phone]').value.trim(), delivery_method: row.querySelector('[data-customer-delivery]').value, is_regular: row.querySelector('[data-customer-regular]').checked, is_vip: row.querySelector('[data-customer-vip]').checked, admin_note: row.querySelector('[data-customer-note]').value.trim() };
-  if (!payload.recipient_name || !payload.phone) { renderToast('收件人與電話不能留白'); return; }
+  const payload = { recipient_name: row.querySelector('[data-customer-name]').value.trim(), email: row.querySelector('[data-customer-email]').value.trim() || null, phone: row.querySelector('[data-customer-phone]').value.trim(), delivery_method: row.querySelector('[data-customer-delivery]').value, is_regular: row.querySelector('[data-customer-regular]').checked, is_vip: row.querySelector('[data-customer-vip]').checked, admin_note: row.querySelector('[data-customer-note]').value.trim() };
+  if (!payload.recipient_name) { renderToast('收件人不能留白'); return; }
   const { error } = await supabase.from('customers').update(payload).eq('id', id); if (error) { renderToast(friendlyError(error)); return; }
-  await loadCustomers(); renderToast('客戶資料已更新');
+  await loadCustomers(); render(); renderToast('客戶資料已更新');
 }
 
 function persistCheckoutDraft() {
@@ -731,6 +788,10 @@ async function exportExcel() {
 
 function bind() {
   bindModalScroll();
+  document.querySelector('.modal-backdrop')?.addEventListener('click', (event) => {
+    if (event.target !== event.currentTarget || state.modal !== 'cart') return;
+    state.modal = null; state.view = 'shop'; render();
+  });
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => { state.view = button.dataset.view; if (state.view === 'admin') state.adminTab = 'markets'; if ((state.view === 'orders' || state.view === 'admin') && state.user) { await Promise.all([loadOrders(), loadMarkets(), loadCustomers(), loadProcurementChecks()]); await loadProductCosts(); } render(); }));
   document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => { const target = button.dataset.scroll; if (state.view !== 'shop') { state.view = 'shop'; render(); requestAnimationFrame(() => document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' })); } else document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' }); }));
   document.querySelectorAll('[data-open-market]').forEach((button) => button.addEventListener('click', () => openMarket(button.dataset.openMarket)));
@@ -747,8 +808,8 @@ function bind() {
   document.querySelector('[data-action="forgot-password"]')?.addEventListener('click', () => { state.modal = 'forgot'; render(); });
   document.querySelector('[data-action="back-login"]')?.addEventListener('click', () => { state.modal = 'auth'; state.authMode = 'login'; render(); });
   document.querySelector('[data-action="send-recovery"]')?.addEventListener('click', sendRecovery); document.querySelector('[data-action="update-password"]')?.addEventListener('click', updatePassword);
-  document.querySelector('[data-action="logout"]')?.addEventListener('click', async () => { await supabase.auth.signOut(); state.view = 'shop'; renderToast('已登出'); });
-  document.querySelector('[data-action="begin-checkout"]')?.addEventListener('click', () => { if (!state.user) { state.authMode = 'login'; state.modal = 'auth'; renderToast('請先登入，再送出訂單'); return; } state.modal = 'checkout'; render(); });
+  document.querySelector('[data-action="logout"]')?.addEventListener('click', async () => { await supabase.auth.signOut(); state.view = 'shop'; render(); renderToast('已登出'); });
+  document.querySelector('[data-action="begin-checkout"]')?.addEventListener('click', () => { if (!state.user) { state.authMode = 'login'; state.modal = 'auth'; render(); renderToast('請先登入，再送出訂單'); return; } state.modal = 'checkout'; render(); });
   document.querySelector('[data-action="checkout"]')?.addEventListener('click', checkout);
   document.querySelectorAll('#customer,#phone,#delivery,#note').forEach((input) => input.addEventListener('input', persistCheckoutDraft));
   document.querySelectorAll('[data-checkout-mode]').forEach((button) => button.addEventListener('click', () => { persistCheckoutDraft(); state.checkoutMode = button.dataset.checkoutMode; if (state.checkoutMode === 'general') state.checkoutDraft.customerId = null; saveCheckoutDraft(); render(); }));
@@ -769,9 +830,10 @@ function bind() {
   document.querySelectorAll('[data-toggle-market]').forEach((button) => button.addEventListener('click', () => toggleMarket(button.dataset.toggleMarket)));
   document.querySelector('[data-action="add-draft-item"]')?.addEventListener('click', () => { syncMarketDraftFromForm(); state.marketDraft.products.push({ key: crypto.randomUUID(), name: '', foreign_cost: 0, exchange_rate: 0, cost: 0, price: '', stock: 0, is_active: true, file: null, removeBg: false }); render(); });
   document.querySelectorAll('[data-remove-draft-item]').forEach((button) => button.addEventListener('click', () => { syncMarketDraftFromForm(); state.marketDraft.products = state.marketDraft.products.filter((item) => item.key !== button.dataset.removeDraftItem); render(); }));
-  document.querySelector('#market-image')?.addEventListener('change', () => { syncMarketDraftFromForm(); render(); });
-  document.querySelectorAll('[data-item-image]').forEach((input) => input.addEventListener('change', () => { syncMarketDraftFromForm(); render(); }));
+  document.querySelector('#market-image')?.addEventListener('change', (event) => previewSelectedImage(event.currentTarget));
+  document.querySelectorAll('[data-item-image]').forEach((input) => input.addEventListener('change', (event) => previewSelectedImage(event.currentTarget)));
   document.querySelectorAll('[data-item-foreign-cost],[data-item-exchange-rate]').forEach((input) => input.addEventListener('change', () => autoCalculateLocalCost(input.closest('[data-item-row]'))));
+  document.querySelector('[data-action="cancel-market"]')?.addEventListener('click', () => { state.modal = null; state.marketDraft = null; state.editingMarketId = null; render(); });
   document.querySelector('[data-action="save-market"]')?.addEventListener('click', saveMarket);
   document.querySelectorAll('[data-order-status]').forEach((select) => select.addEventListener('change', () => updateOrderStatus(select.dataset.orderStatus, select.value)));
   document.querySelectorAll('[data-save-item-quantity]').forEach((button) => button.addEventListener('click', () => updateOrderItemQuantity(button.dataset.saveItemQuantity)));
@@ -779,5 +841,6 @@ function bind() {
   document.querySelectorAll('[data-delete-order]').forEach((button) => button.addEventListener('click', () => deleteOrder(button.dataset.deleteOrder)));
 }
 
+document.addEventListener('visibilitychange', () => { if (document.hidden) captureOpenDraft(); });
 render();
 initialize();
