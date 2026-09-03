@@ -7,7 +7,7 @@
     <meta name="description" content="NewShop連線代購，精選連線選物與少量預購賣場。" />
     <link rel="icon" type="image/png" href="/assets/newshop-logo.png?v=2" />
     <title>NewShop連線代購</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=6" />
   </head>
   <body>
     <div id="brand-intro" class="brand-intro" aria-hidden="true">
@@ -17,7 +17,35 @@
         <strong>NewShop連線代購</strong>
       </div>
     </div>
+    <script>
+      (() => {
+        const intro = document.querySelector('#brand-intro');
+        const logo = intro?.querySelector('img');
+        if (!intro) return;
+
+        let started = false;
+        const play = () => {
+          if (started) return;
+          if (document.hidden) {
+            document.addEventListener('visibilitychange', play, { once: true });
+            return;
+          }
+          started = true;
+          requestAnimationFrame(() => intro.classList.add('is-playing'));
+          intro.addEventListener('animationend', (event) => {
+            if (event.target === intro) intro.remove();
+          });
+          window.setTimeout(() => intro.remove(), 3400);
+        };
+
+        if (logo?.complete) play();
+        else {
+          logo?.addEventListener('load', play, { once: true });
+          window.setTimeout(play, 700);
+        }
+      })();
+    </script>
     <div id="app"></div>
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js?v=6"></script>
   </body>
 </html>
