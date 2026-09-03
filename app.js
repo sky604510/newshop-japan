@@ -32,14 +32,19 @@ const dateValue = (value) => value ? new Date(value).toLocaleDateString('en-CA')
 const isClosed = (market) => Boolean(market?.closes_at && new Date(market.closes_at) < new Date());
 const deliverySelect = (selected = '面交取貨') => deliveryOptions.map((option) => `<option value="${esc(option)}" ${option === selected ? 'selected' : ''}>${esc(option)}</option>`).join('');
 let toastTimer = null;
+let toastElement = null;
 
 function renderToast(message) {
   state.toast = message;
-  let toast = document.querySelector('.toast');
-  if (!toast) { toast = document.createElement('div'); toast.className = 'toast'; document.body.appendChild(toast); }
-  toast.textContent = message;
+  if (!toastElement?.isConnected) {
+    document.querySelectorAll('.toast').forEach((toast) => toast.remove());
+    toastElement = document.createElement('div'); toastElement.className = 'toast'; document.body.appendChild(toastElement);
+  }
+  toastElement.textContent = message;
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { state.toast = ''; document.querySelector('.toast')?.remove(); }, 2600);
+  toastTimer = window.setTimeout(() => {
+    state.toast = ''; toastElement?.remove(); toastElement = null; toastTimer = null;
+  }, 2600);
 }
 
 function friendlyError(error) {
@@ -407,10 +412,9 @@ function render() {
   const suppressRerenderMotion = Boolean(document.querySelector('#app')?.children.length);
   const previousModalScroll = document.querySelector('.modal')?.scrollTop || 0;
   const previousDetailScroll = document.querySelector('.detail-copy')?.scrollTop || 0;
-  captureOpenDraft();
   if (suppressRerenderMotion) document.body.classList.add('suppress-modal-motion');
   const content = state.view === 'shop' ? shop() : state.view === 'orders' ? ordersView() : adminView();
-  document.querySelector('#app').innerHTML = `<div class="shell">${nav()}${content}${footer()}</div>${state.modal ? modal() : ''}${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ''}`;
+  document.querySelector('#app').innerHTML = `<div class="shell">${nav()}${content}${footer()}</div>${state.modal ? modal() : ''}`;
   document.body.classList.toggle('modal-open', Boolean(state.modal));
   bind();
   const nextModal = document.querySelector('.modal');
@@ -865,6 +869,8 @@ function bind() {
   document.querySelector('[data-action="begin-checkout"]')?.addEventListener('click', () => { if (!state.user) { state.authMode = 'login'; state.modal = 'auth'; render(); renderToast('請先登入，再送出訂單'); return; } state.modal = 'checkout'; render(); });
   document.querySelector('[data-action="checkout"]')?.addEventListener('click', checkout);
   document.querySelectorAll('#customer,#phone,#delivery,#note').forEach((input) => input.addEventListener('input', persistCheckoutDraft));
+  document.querySelectorAll('#market-name,#market-description,#market-closes-at,#market-active,#market-remove-bg,[data-item-name],[data-item-foreign-cost],[data-item-exchange-rate],[data-item-cost],[data-item-price],[data-item-stock],[data-item-active],[data-item-remove-bg]').forEach((input) => input.addEventListener('input', syncMarketDraftFromForm));
+  document.querySelectorAll('#new-customer-name,#new-customer-phone,#new-customer-email,#new-customer-delivery,#new-customer-note,#new-customer-regular,#new-customer-vip').forEach((input) => input.addEventListener('input', captureOpenDraft));
   document.querySelectorAll('[data-checkout-mode]').forEach((button) => button.addEventListener('click', () => { persistCheckoutDraft(); state.checkoutMode = button.dataset.checkoutMode; if (state.checkoutMode === 'general') state.checkoutDraft.customerId = null; saveCheckoutDraft(); render(); }));
   document.querySelector('#regular-customer')?.addEventListener('change', (event) => selectRegularCustomer(event.target.value));
   document.querySelector('[data-action="view-orders"]')?.addEventListener('click', () => { state.modal = null; state.view = 'orders'; render(); });
