@@ -211,6 +211,14 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
 
 .admin-market { display:flex; align-items:center; gap:11px; min-width:210px; }
 .admin-market > span:last-child { display:grid; gap:3px; }
+.drag-handle { touch-action:none; user-select:none; cursor:grab; }
+.drag-handle:active { cursor:grabbing; }
+.drag-handle:disabled { cursor:not-allowed; opacity:.35; }
+.market-sort-table th:first-child,.market-sort-table td:first-child { width:54px; text-align:center; }
+.market-sort-table [data-market-drag] { width:34px; height:34px; border-radius:11px; color:var(--rose-deep); background:var(--blush); font-size:17px; font-weight:900; letter-spacing:-3px; }
+.sortable-market.is-pinned td { background:#fff8fb; }
+.sortable-market.is-pinned td:first-child { box-shadow:inset 4px 0 0 var(--rose-deep); }
+.sortable-market.is-dragging,.compact-item.is-dragging { position:relative; z-index:4; opacity:.68; box-shadow:0 14px 35px rgba(87,56,71,.2); }
 .admin-market small,.customer-table td > small { display:block; color:var(--muted); font-size:11px; margin-top:4px; }
 .admin-thumb,.upload-thumb { width:54px; height:54px; flex:none; overflow:hidden; display:grid; place-items:center; border:1px solid var(--line); border-radius:13px; background:#fff1f6; color:var(--muted); font-size:10px; font-weight:800; }
 .admin-thumb img,.upload-thumb img { width:100%; height:100%; object-fit:contain; }
@@ -277,7 +285,7 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
 .image-button input,.image-pick input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
 .compact-list { gap:8px; }
 .compact-item { display:grid; grid-template-columns:28px minmax(180px,1.7fr) repeat(5,minmax(72px,.58fr)) 132px 58px 48px; gap:8px; align-items:center; padding:10px; border-radius:14px; }
-.item-index { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; color:white; background:var(--ink); font-size:11px; font-weight:800; }
+.item-index { display:grid; place-items:center; width:26px; height:26px; padding:0; border-radius:50%; color:white; background:var(--ink); font-size:11px; font-weight:800; }
 .compact-input { display:grid; gap:4px; }
 .compact-input > span { color:var(--muted); font-size:10px; font-weight:800; }
 .compact-input input { min-width:0; padding:9px 10px; border-radius:10px; }
