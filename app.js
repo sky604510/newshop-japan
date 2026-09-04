@@ -33,6 +33,23 @@ const isClosed = (market) => Boolean(market?.closes_at && new Date(market.closes
 const deliverySelect = (selected = '面交取貨') => deliveryOptions.map((option) => `<option value="${esc(option)}" ${option === selected ? 'selected' : ''}>${esc(option)}</option>`).join('');
 let toastTimer = null;
 let toastElement = null;
+let deferredInstallPrompt = null;
+
+const isStandaloneApp = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+async function installPwa() {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    render();
+    return;
+  }
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  window.alert(isIos
+    ? '請使用 Safari 開啟網站，點下方「分享」圖示，再選擇「加入主畫面」。'
+    : '請開啟瀏覽器選單，選擇「安裝應用程式」或「新增至主畫面」。若已安裝，就不需要再操作。');
+}
 
 function renderToast(message) {
   state.toast = message;
@@ -364,7 +381,7 @@ function adminView() {
   return `<main class="admin-page">${migrationNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
 }
 
-function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
+function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span>${isStandaloneApp() ? '' : '<button class="pwa-install" data-action="install-pwa">安裝到手機</button>'}</footer>`; }
 
 function marketDetailModal() {
   const market = state.markets.find((item) => item.id === state.selectedMarketId);
@@ -1049,6 +1066,7 @@ function bind() {
   document.querySelectorAll('[data-detail-qty]').forEach((button) => button.addEventListener('click', () => changeDetailQuantity(Number(button.dataset.detailQty))));
   document.querySelector('[data-action="add-selected-item"]')?.addEventListener('click', addSelectedItem);
   document.querySelector('[data-action="cart"]')?.addEventListener('click', () => { state.modal = 'cart'; render(); });
+  document.querySelector('[data-action="install-pwa"]')?.addEventListener('click', installPwa);
   document.querySelectorAll('[data-remove]').forEach((button) => button.addEventListener('click', () => { state.cart = state.cart.filter((item) => item.id !== button.dataset.remove); saveCart(); render(); }));
   document.querySelectorAll('[data-cart-change]').forEach((button) => button.addEventListener('click', () => changeCartQuantity(button.dataset.cartChange, Number(button.dataset.delta))));
   document.querySelectorAll('[data-action="close"]').forEach((button) => button.addEventListener('click', closeActiveModal));
@@ -1118,5 +1136,20 @@ document.addEventListener('keydown', (event) => {
   state.previewImage = null; render();
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) captureOpenDraft(); });
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  render();
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  renderToast('NewShop 已安裝到裝置');
+  render();
+});
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch((error) => console.warn('PWA service worker registration failed', error));
+  });
+}
 render();
 initialize();

@@ -195,7 +195,9 @@ textarea { resize:vertical; }
 .mini-switch input,.check-field input { width:18px; height:18px; accent-color:var(--rose-deep); }
 .check-field { display:flex; align-items:center; gap:8px; margin:18px 0; font-size:13px; font-weight:700; }
 .toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--ink); color:white; padding:12px 18px; border-radius:999px; z-index:30; box-shadow:var(--shadow); }
-footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px solid var(--line); display:flex; justify-content:space-between; gap:20px; }
+footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:20px; }
+.pwa-install { padding:9px 14px; border:1px solid var(--line); border-radius:999px; color:var(--rose-deep); background:white; font-weight:800; white-space:nowrap; }
+.pwa-install:hover { border-color:var(--rose); background:var(--blush); }
 
 /* Compact editorial storefront: the market grid is the first thing customers see. */
 .catalog-first { padding:30px 0 72px!important; }
