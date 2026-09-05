@@ -177,13 +177,14 @@ textarea { resize:vertical; }
 .stat { background:#fff2f6; border-radius:17px; padding:17px; }
 .stat small { color:var(--muted); }
 .stat strong { display:block; font-size:25px; margin-top:6px; }
-.table-wrap { overflow:auto; }
+.table-wrap { width:100%; max-width:100%; min-width:0; overflow-x:auto; overflow-y:visible; -webkit-overflow-scrolling:touch; touch-action:pan-x pan-y; }
 .admin-table { width:100%; border-collapse:collapse; text-align:left; }
 .admin-table th { color:var(--muted); font-size:12px; padding:10px; white-space:nowrap; }
 .admin-table td { border-top:1px solid var(--line); padding:13px 10px; vertical-align:middle; }
 .admin-table select { min-width:110px; padding:8px 10px; }
 .admin-actions { display:flex; gap:7px; }
 .admin-actions .btn { padding:8px 12px; white-space:nowrap; }
+.mobile-table-hint { display:none; }
 .setup-notice { padding:13px 15px; margin-bottom:18px; border-radius:14px; background:var(--butter); color:#785f2d; font-size:13px; }
 .market-editor { width:min(1080px,100%); }
 .editor-divider { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:20px 0 10px; border-top:1px solid var(--line); margin-top:20px; }
@@ -196,8 +197,9 @@ textarea { resize:vertical; }
 .check-field { display:flex; align-items:center; gap:8px; margin:18px 0; font-size:13px; font-weight:700; }
 .toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--ink); color:white; padding:12px 18px; border-radius:999px; z-index:30; box-shadow:var(--shadow); }
 footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:20px; }
-.pwa-install { padding:9px 14px; border:1px solid var(--line); border-radius:999px; color:var(--rose-deep); background:white; font-weight:800; white-space:nowrap; }
-.pwa-install:hover { border-color:var(--rose); background:var(--blush); }
+.pwa-install { position:fixed; right:max(18px,env(safe-area-inset-right)); bottom:max(18px,env(safe-area-inset-bottom)); z-index:9; padding:12px 18px; border:1px solid var(--ink); border-radius:999px; color:white; background:var(--ink); box-shadow:0 12px 32px rgba(89,39,59,.22); font-weight:800; white-space:nowrap; transition:transform .2s ease,box-shadow .2s ease; }
+.pwa-install:hover { transform:translateY(-2px); box-shadow:0 16px 38px rgba(89,39,59,.28); }
+body.modal-open .pwa-install { display:none; }
 
 /* Compact editorial storefront: the market grid is the first thing customers see. */
 .catalog-first { padding:30px 0 72px!important; }
@@ -397,8 +399,8 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
   .detail-total { text-align:left; }
   .detail-total strong { font-size:18px; }
   .add-cart-wide { padding:11px 9px; font-size:13px; }
-  .admin-page { gap:14px; margin:18px 0 55px; }
-  .admin-page .panel { padding:17px; border-radius:20px; }
+  .admin-page { width:100%; max-width:100%; min-width:0; gap:14px; margin:18px 0 55px; overflow:visible; }
+  .admin-page .panel { width:100%; max-width:100%; min-width:0; padding:17px; border-radius:20px; }
   .admin-page .section-head { gap:12px; margin-bottom:16px; }
   .admin-page .section-head h2 { margin:5px 0 8px; font-size:27px; line-height:1.15; }
   .admin-page .section-head p { margin:0; font-size:12px; }
@@ -408,8 +410,14 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
   .admin-tabs button { padding:11px 6px; font-size:12px; }
   .stat:last-child { grid-column:span 2; }
   .form-grid { grid-template-columns:1fr; }
-  .admin-page .table-wrap { margin:0 -8px; padding:0 8px 4px; overscroll-behavior-x:contain; scrollbar-gutter:stable; }
+  .admin-page .table-wrap { width:calc(100% + 16px); max-width:calc(100% + 16px); min-width:0; margin:0 -8px; padding:0 8px 10px; overflow-x:scroll; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-gutter:stable; touch-action:pan-x pan-y; }
   .admin-table { min-width:760px; font-size:12px; }
+  .order-management-table { width:920px; min-width:920px; }
+  .order-management-table th:first-child,.order-management-table td:first-child { min-width:145px; }
+  .order-management-table th:nth-child(2),.order-management-table td:nth-child(2) { min-width:150px; }
+  .order-management-table th:nth-child(3),.order-management-table td:nth-child(3) { min-width:260px; }
+  .order-table-wrap { border:1px solid var(--line); border-radius:14px; background:white; box-shadow:inset -18px 0 18px -22px rgba(33,22,29,.45); }
+  .mobile-table-hint { display:block; margin:0 0 8px; color:var(--rose-deep); font-size:12px; font-weight:800; text-align:center; }
   .admin-table th,.admin-table td { padding:10px 8px; }
   .customer-table { min-width:1080px; }
   .shipment-table { min-width:780px; }
@@ -435,6 +443,7 @@ footer { padding:25px 0 48px; color:var(--muted); font-size:13px; border-top:1px
   .editor-save-actions { width:100%; }
   .cart-line { align-items:flex-start; flex-direction:column; }
   .cart-controls { width:100%; }
+  .pwa-install { right:max(12px,env(safe-area-inset-right)); bottom:max(12px,env(safe-area-inset-bottom)); padding:11px 15px; font-size:13px; }
 }
 
 @media(prefers-reduced-motion:reduce) {
