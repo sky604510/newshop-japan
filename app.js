@@ -33,24 +33,6 @@ const isClosed = (market) => Boolean(market?.closes_at && new Date(market.closes
 const deliverySelect = (selected = '面交取貨') => deliveryOptions.map((option) => `<option value="${esc(option)}" ${option === selected ? 'selected' : ''}>${esc(option)}</option>`).join('');
 let toastTimer = null;
 let toastElement = null;
-let deferredInstallPrompt = null;
-
-const isStandaloneApp = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
-async function installPwa() {
-  if (deferredInstallPrompt) {
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt = null;
-    render();
-    return;
-  }
-  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  window.alert(isIos
-    ? '請使用 Safari 開啟網站，點下方「分享」圖示，再選擇「加入主畫面」。'
-    : '請開啟瀏覽器選單，選擇「安裝應用程式」或「新增至主畫面」。若已安裝，就不需要再操作。');
-}
-
 function renderToast(message) {
   state.toast = message;
   if (!toastElement?.isConnected) {
@@ -329,6 +311,7 @@ function orderItemSummary(item) {
 function createOrderDraft(order) {
   return {
     orderId: order.id,
+    delivery_method: order.delivery_method,
     items: (order.order_items || []).map((item) => ({
       key: item.id, id: item.id, product_id: item.product_id || '', market_id: item.market_id || '',
       product_name: item.product_name, quantity: Number(item.quantity), unit_price: Number(item.unit_price),
@@ -353,7 +336,7 @@ function orderEditorModal() {
     const image = product?.image_url;
     return `<div class="order-edit-row ${item.id ? '' : 'is-new'}" data-order-draft-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><div class="order-edit-product"><button class="order-item-thumb image-preview-trigger" data-preview-image="${esc(image || '')}" aria-label="${image ? `放大查看 ${esc(product?.name || item.product_name)}` : '沒有商品圖片'}" ${image ? '' : 'disabled'}>${image ? `<img src="${esc(image)}" alt=""/>` : ''}</button>${item.id ? `<div><strong>${esc(item.product_name)}</strong><small>${esc(market?.name || '未分類賣場')}</small></div>` : `<div class="order-add-selects"><label>賣場<select data-order-draft-market><option value="">選擇賣場</option>${marketOptions}</select></label><label>商品<select data-order-draft-product ${item.market_id ? '' : 'disabled'}><option value="">選擇商品</option>${productOptions}</select></label></div>`}</div><label class="order-edit-number">數量<input data-order-draft-quantity type="number" min="0" step="1" value="${item.quantity}"/></label><label class="order-edit-number">單價<input data-order-draft-price type="number" min="0" step="1" value="${item.unit_price}"/></label><button class="order-edit-remove" data-remove-order-draft-item="${esc(item.key)}" type="button">${item.id ? '設為 0' : '移除'}</button>${item.original_unit_price != null ? `<small class="adjusted-note">原始單價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
   }).join('');
-  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；無庫存商品會呈灰色且無法選擇。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select><button class="btn btn-light" data-save-order-delivery>儲存取貨方式</button></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；無庫存商品會呈灰色且無法選擇。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
 }
 
 function adminView() {
@@ -471,8 +454,8 @@ function render() {
   const previousDetailScroll = document.querySelector('.detail-copy')?.scrollTop || 0;
   if (suppressRerenderMotion) document.body.classList.add('suppress-modal-motion');
   const content = state.view === 'shop' ? shop() : state.view === 'orders' ? ordersView() : adminView();
-  const installButton = isStandaloneApp() ? '' : '<button class="pwa-install" data-action="install-pwa" aria-label="將 NewShop 安裝到裝置">↓ 安裝 App</button>';
-  document.querySelector('#app').innerHTML = `<div class="shell">${nav()}${content}${footer()}</div>${installButton}${state.modal ? modal() : ''}${state.previewImage ? imagePreviewModal() : ''}`;
+
+  document.querySelector('#app').innerHTML = `<div class="shell">${nav()}${content}${footer()}</div>${state.modal ? modal() : ''}${state.previewImage ? imagePreviewModal() : ''}`;
   document.body.classList.toggle('modal-open', Boolean(state.modal || state.previewImage));
   bind();
   const nextModal = document.querySelector('.modal');
@@ -861,6 +844,7 @@ async function updateOrderStatus(id, status) {
 
 function syncOrderDraftFromForm() {
   if (!state.orderDraft) return;
+  state.orderDraft.delivery_method = document.querySelector('#order-delivery')?.value ?? state.orderDraft.delivery_method;
   const previous = new Map(state.orderDraft.items.map((item) => [item.key, item]));
   state.orderDraft.items = [...document.querySelectorAll('[data-order-draft-row]')].map((row) => {
     const old = previous.get(row.dataset.key) || {};
@@ -1054,7 +1038,26 @@ async function exportExcel() {
   } catch (error) { renderToast(`Excel 產生失敗：${friendlyError(error)}`); }
 }
 
+async function saveOrderDelivery() {
+  if (!isManager() || !state.orderDraft) return;
+  syncOrderDraftFromForm();
+  const delivery = state.orderDraft.delivery_method;
+  if (!deliveryOptions.includes(delivery)) return;
+  const button = document.querySelector('[data-save-order-delivery]');
+  if (button) button.disabled = true;
+  try {
+    const { data, error } = await supabase.from('orders').update({ delivery_method: delivery }).eq('id', state.orderDraft.orderId).select('id,delivery_method').single();
+    if (error) throw error;
+    const order = state.orders.find((entry) => entry.id === data.id);
+    if (order) order.delivery_method = data.delivery_method;
+    renderToast('取貨方式已儲存');
+  } catch (error) { renderToast(friendlyError(error)); }
+  finally { if (button) button.disabled = false; }
+}
+
 function bind() {
+  document.querySelector('[data-save-order-delivery]')?.addEventListener('click', saveOrderDelivery);
+  document.querySelector('#order-delivery')?.addEventListener('change', syncOrderDraftFromForm);
   bindModalScroll();
   document.querySelector('.modal-backdrop')?.addEventListener('click', (event) => {
     if (event.target !== event.currentTarget) return;
@@ -1067,7 +1070,7 @@ function bind() {
   document.querySelectorAll('[data-detail-qty]').forEach((button) => button.addEventListener('click', () => changeDetailQuantity(Number(button.dataset.detailQty))));
   document.querySelector('[data-action="add-selected-item"]')?.addEventListener('click', addSelectedItem);
   document.querySelector('[data-action="cart"]')?.addEventListener('click', () => { state.modal = 'cart'; render(); });
-  document.querySelector('[data-action="install-pwa"]')?.addEventListener('click', installPwa);
+
   document.querySelectorAll('[data-remove]').forEach((button) => button.addEventListener('click', () => { state.cart = state.cart.filter((item) => item.id !== button.dataset.remove); saveCart(); render(); }));
   document.querySelectorAll('[data-cart-change]').forEach((button) => button.addEventListener('click', () => changeCartQuantity(button.dataset.cartChange, Number(button.dataset.delta))));
   document.querySelectorAll('[data-action="close"]').forEach((button) => button.addEventListener('click', closeActiveModal));
@@ -1137,20 +1140,5 @@ document.addEventListener('keydown', (event) => {
   state.previewImage = null; render();
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) captureOpenDraft(); });
-window.addEventListener('beforeinstallprompt', (event) => {
-  event.preventDefault();
-  deferredInstallPrompt = event;
-  render();
-});
-window.addEventListener('appinstalled', () => {
-  deferredInstallPrompt = null;
-  renderToast('NewShop 已安裝到裝置');
-  render();
-});
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch((error) => console.warn('PWA service worker registration failed', error));
-  });
-}
 render();
 initialize();
