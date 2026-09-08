@@ -141,6 +141,19 @@ textarea { resize:vertical; }
 .item-label { display:flex; justify-content:space-between; align-items:center; font-weight:800; margin:22px 0 10px; }
 .item-label small { color:var(--muted); font-weight:500; }
 .item-options { display:grid; gap:8px; }
+.batch-item { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; }
+.batch-item .item-option { width:100%; min-width:0; }
+.batch-item .qty-control { gap:5px; }
+.batch-item .qty-control strong { min-width:18px; text-align:center; }
+.batch-item.unavailable .item-option { opacity:.5; }
+.batch-item.has-quantity .item-option { border-color:var(--rose-deep); background:#fff4f7; }
+.batch-buy { margin-top:18px; padding-top:10px; border-top:1px solid var(--line); }
+@media(max-width:820px) {
+  .market-detail:has(.batch-item) { grid-template-columns:minmax(80px,27%) minmax(0,73%); }
+  .batch-item { gap:5px; }
+  .batch-item .qty-control { display:grid; grid-template-columns:30px; gap:2px; justify-items:center; }
+  .batch-item .qty-control button { width:30px; height:32px; }
+}
 .item-option { position:relative; overflow:hidden; display:grid; grid-template-columns:1fr auto; gap:2px 12px; text-align:left; padding:13px 14px; border:1px solid var(--line); border-radius:15px; background:white; color:var(--ink); transition:border .18s ease,background .18s ease,transform .18s ease,box-shadow .18s ease; }
 .item-option:hover { transform:translateX(3px); border-color:var(--rose); }
 .item-option.selected { border-color:var(--rose-deep); background:#fff4f7; box-shadow:0 0 0 3px #df7e9d16; }

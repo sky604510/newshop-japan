@@ -1,16 +1,15 @@
-const CACHE_NAME = 'newshop-shell-v4';
+const CACHE_NAME = 'newshop-shell-v5';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/styles.css?v=16',
-  '/app.js?v=16',
-  '/pwa.js?v=16',
-  '/manifest.webmanifest?v=1',
+  '/styles.css?v=17',
+  '/app.js?v=17',
+  '/pwa.js?v=17',
+  '/manifest.webmanifest?v=2',
   '/assets/logo_v2.png?v=1',
-  '/assets/pwa-icon-180.png?v=1',
-  '/assets/pwa-icon-192.png',
-  '/assets/pwa-icon-512.png',
-  '/assets/pwa-icon-maskable-512.png',
+  '/assets/app-center-180.png',
+  '/assets/app-center-192.png',
+  '/assets/app-center-512.png',
 ];
 
 self.addEventListener('install', (event) => {

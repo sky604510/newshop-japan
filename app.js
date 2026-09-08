@@ -12,7 +12,7 @@ const managerRoles = new Set(['admin', 'owner']);
 const state = {
   view: 'shop', cart: JSON.parse(localStorage.getItem('newshop_cart') || '[]'),
   user: null, profile: null, markets: [], products: [], orders: [], customers: [], modal: null, previewImage: null,
-  selectedMarketId: null, selectedProductId: null, detailQty: 1,
+  selectedMarketId: null, selectedProductId: null, detailQty: 1, batchQuantities: {}, cartReturnMarketId: null, marketScroll: 0,
   marketDraft: null, editingMarketId: null, orderDraft: null, editingOrderId: null, lastOrder: null,
   customerDraft: null, checkoutMode: 'general',
   checkoutDraft: JSON.parse(localStorage.getItem('newshop_checkout_draft') || '{}'),
@@ -370,11 +370,52 @@ function marketDetailModal() {
   const market = state.markets.find((item) => item.id === state.selectedMarketId);
   if (!market) return '';
   const items = market.products.filter((item) => item.is_active).sort((a, b) => Number(Number(a.stock) <= 0) - Number(Number(b.stock) <= 0));
-  const selected = items.find((item) => item.id === state.selectedProductId) || items.find((item) => item.stock > 0) || items[0];
-  const cover = selected?.image_url;
-  const art = cover ? `<img class="detail-product-image" src="${esc(cover)}" alt="${esc(market.name)}" />` : `<span class="detail-empty-image" aria-hidden="true"></span>`;
+  const selected = items.find((item) => item.id === state.selectedProductId) || items[0];
   const closed = isClosed(market);
-  return `<div class="modal-backdrop"><div class="modal market-detail"><button class="close detail-close" data-action="close">×</button><div class="detail-media">${art}<span class="market-pill">${esc(market.name)}</span></div><div class="detail-copy"><span class="eyebrow">SELECT YOUR ITEM</span><h2>${esc(market.name)}</h2><p>${esc(market.description)}</p>${market.closes_at ? `<div class="deadline ${closed ? 'closed' : ''}">${closed ? '此賣場已截止收單' : `收單至 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}`}</div>` : ''}<div class="item-label">品項 <small>每款價格獨立計算</small></div><div class="item-options">${items.map((item) => `<button class="item-option ${selected?.id === item.id ? 'selected' : ''}" data-select-item="${item.id}" aria-pressed="${selected?.id === item.id}" ${item.stock <= 0 || closed ? 'disabled' : ''}><span>${esc(item.name)}</span><strong>${money(item.price)}</strong><small>${item.stock > 0 && !closed ? '可購買' : '無庫存'}</small></button>`).join('')}</div>${selected ? `<div class="detail-buy"><div><span>數量</span><div class="qty-control"><button data-detail-qty="-1" ${state.detailQty <= 1 ? 'disabled' : ''}>−</button><strong data-detail-count>${state.detailQty}</strong><button data-detail-qty="1" ${state.detailQty >= selected.stock || closed ? 'disabled' : ''}>＋</button></div></div><div class="detail-total"><span>小計</span><strong data-detail-total>${money(Number(selected.price) * state.detailQty)}</strong></div></div><button class="btn btn-primary add-cart-wide" data-action="add-selected-item" ${selected.stock <= 0 || closed ? 'disabled' : ''}>${closed ? '賣場已截止收單' : selected.stock <= 0 ? '無庫存' : '加入購物車'}</button>` : `<div class="empty">這個賣場還沒有品項</div>`}</div></div></div>`;
+  const art = selected?.image_url ? `<img class="detail-product-image" src="${esc(selected.image_url)}" alt="${esc(selected.name)}"/>` : '<span class="detail-empty-image" aria-hidden="true"></span>';
+  return `<div class="modal-backdrop"><div class="modal market-detail"><button class="close detail-close" data-action="close">×</button><div class="detail-media">${art}<span class="market-pill">${esc(market.name)}</span></div><div class="detail-copy"><h2>${esc(market.name)}</h2><p>${esc(market.description)}</p>${market.closes_at ? `<div class="deadline">${closed ? '此賣場已截止收單' : '收單至 ' + new Date(market.closes_at).toLocaleDateString('zh-TW')}</div>` : ''}<div class="item-label">品項 <small>每款價格獨立計算</small></div><div class="item-options">${items.map((item) => {
+    const qty = Number(state.batchQuantities[item.id] || 0);
+    const available = batchAvailable(item);
+    return `<div class="batch-item ${qty ? 'has-quantity' : ''} ${item.stock <= 0 || closed ? 'unavailable' : ''}" data-batch-row="${item.id}"><button class="item-option ${selected?.id === item.id ? 'selected' : ''}" data-select-item="${item.id}" aria-pressed="${selected?.id === item.id}"><span>${esc(item.name)}</span><strong>${money(item.price)}</strong><small>${closed ? '已截止' : item.stock <= 0 ? '無庫存' : '可購買'}</small></button><div class="qty-control"><button data-batch-item="${item.id}" data-batch-delta="-1" aria-label="減少 ${esc(item.name)} 數量" ${qty <= 0 ? 'disabled' : ''}>−</button><strong data-batch-count="${item.id}">${qty}</strong><button data-batch-item="${item.id}" data-batch-delta="1" aria-label="增加 ${esc(item.name)} 數量" ${closed || qty >= available ? 'disabled' : ''}>＋</button></div></div>`;
+  }).join('')}</div><div class="batch-buy"><div class="cart-total"><span>已選 <strong data-batch-total-count>${batchTotals().count}</strong> 件</span><strong data-batch-total-price>${money(batchTotals().price)}</strong></div><button class="btn btn-primary add-cart-wide" data-action="add-selected-item" ${closed || !batchTotals().count ? 'disabled' : ''}>${closed ? '賣場已截止收單' : '一次加入購物車'}</button></div></div></div></div>`;
+}
+
+function batchAvailable(product) {
+  return Math.max(0, Number(product.stock) - Number(state.cart.find((item) => item.id === product.id)?.qty || 0));
+}
+function batchTotals() {
+  const market = state.markets.find((item) => item.id === state.selectedMarketId);
+  return (market?.products || []).reduce((sum, item) => {
+    const qty = Number(state.batchQuantities[item.id] || 0);
+    return { count: sum.count + qty, price: sum.price + qty * Number(item.price) };
+  }, { count: 0, price: 0 });
+}
+function changeBatchQuantity(id, delta) {
+  const market = state.markets.find((item) => item.id === state.selectedMarketId);
+  const product = market?.products.find((item) => item.id === id);
+  if (!product || !product.is_active || isClosed(market)) return;
+  const qty = Math.max(0, Math.min(batchAvailable(product), Number(state.batchQuantities[id] || 0) + delta));
+  state.batchQuantities[id] = qty;
+  const row = document.querySelector(`[data-batch-row="${id}"]`);
+  if (row) {
+    row.classList.toggle('has-quantity', qty > 0);
+    row.querySelector('[data-batch-count]').textContent = qty;
+    row.querySelector('[data-batch-delta="-1"]').disabled = qty <= 0;
+    row.querySelector('[data-batch-delta="1"]').disabled = qty >= batchAvailable(product);
+  }
+  const totals = batchTotals();
+  document.querySelector('[data-batch-total-count]').textContent = totals.count;
+  document.querySelector('[data-batch-total-price]').textContent = money(totals.price);
+  document.querySelector('[data-action="add-selected-item"]').disabled = !totals.count;
+}
+function continueShopping() {
+  const market = state.markets.find((item) => item.id === state.cartReturnMarketId && item.is_active);
+  state.view = 'shop';
+  if (market) {
+    state.selectedMarketId = market.id; state.modal = 'market-detail'; render();
+    const panel = document.querySelector('.detail-copy');
+    if (panel) panel.scrollTop = state.marketScroll;
+  } else { state.modal = null; render(); }
 }
 
 function cartModal() {
@@ -529,6 +570,7 @@ function openMarket(id) {
   const market = state.markets.find((item) => item.id === id);
   if (!market) return;
   const first = market.products.find((item) => item.is_active && item.stock > 0) || market.products.find((item) => item.is_active);
+  state.batchQuantities = {}; state.cartReturnMarketId = id; state.marketScroll = 0;
   state.selectedMarketId = id; state.selectedProductId = first?.id || null; state.detailQty = 1; state.modal = 'market-detail'; render();
 }
 
@@ -559,31 +601,33 @@ function updateDetailArtwork(product, market) {
 function selectMarketItem(id) {
   const market = state.markets.find((item) => item.id === state.selectedMarketId);
   const product = market?.products.find((item) => item.id === id);
-  if (!market || !product || !product.is_active || product.stock <= 0 || isClosed(market)) return;
-  state.selectedProductId = id; state.detailQty = 1;
+  if (!product) return;
+  state.selectedProductId = id;
   document.querySelectorAll('[data-select-item]').forEach((button) => {
     const selected = button.dataset.selectItem === id;
     button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected));
   });
-  const count = document.querySelector('[data-detail-count]'); if (count) count.textContent = '1';
-  const total = document.querySelector('[data-detail-total]'); if (total) total.textContent = money(product.price);
-  const minus = document.querySelector('[data-detail-qty="-1"]'); if (minus) minus.disabled = true;
-  const plus = document.querySelector('[data-detail-qty="1"]'); if (plus) plus.disabled = product.stock <= 1;
-  const add = document.querySelector('[data-action="add-selected-item"]');
-  if (add) { add.disabled = false; add.textContent = '加入購物車'; }
   updateDetailArtwork(product, market);
 }
 
 function addSelectedItem() {
-  const product = state.products.find((item) => item.id === state.selectedProductId);
-  const market = state.markets.find((item) => item.id === product?.market_id);
-  if (!product || !product.is_active || product.stock <= 0 || isClosed(market)) return;
-  const existing = state.cart.find((item) => item.id === product.id);
-  const nextQty = (existing?.qty || 0) + state.detailQty;
-  if (nextQty > product.stock) { renderToast('已達目前可購買庫存'); return; }
-  if (existing) existing.qty = nextQty;
-  else state.cart.push({ id: product.id, product_id: product.id, market_id: product.market_id, market_name: product.market_name, name: product.name, price: Number(product.price), qty: state.detailQty, stock: product.stock });
-  saveCart(); state.modal = 'cart'; render(); renderToast(`${product.name} 已加入購物車`);
+  const market = state.markets.find((item) => item.id === state.selectedMarketId);
+  if (!market || isClosed(market)) return;
+  const selected = market.products.filter((item) => Number(state.batchQuantities[item.id]) > 0);
+  if (!selected.length) return;
+  if (selected.some((item) => !item.is_active || !Number.isInteger(state.batchQuantities[item.id]) || state.batchQuantities[item.id] > batchAvailable(item))) {
+    renderToast('部分商品已達可購買數量，請重新確認'); return;
+  }
+  for (const product of selected) {
+    const qty = state.batchQuantities[product.id];
+    const existing = state.cart.find((item) => item.id === product.id);
+    if (existing) existing.qty += qty;
+    else state.cart.push({ id: product.id, product_id: product.id, market_id: market.id, market_name: market.name, name: product.name, price: Number(product.price), qty, stock: product.stock });
+  }
+  state.cartReturnMarketId = market.id;
+  state.marketScroll = document.querySelector('.detail-copy')?.scrollTop || 0;
+  state.batchQuantities = {};
+  saveCart(); state.modal = 'cart'; render(); renderToast('所選商品已加入購物車');
 }
 
 function changeCartQuantity(id, delta) {
@@ -876,6 +920,7 @@ function closeOrderEditor() {
 }
 
 function closeActiveModal() {
+  if (state.modal === 'cart') { continueShopping(); return; }
   if (state.modal === 'checkout') persistCheckoutDraft();
   if (state.modal === 'order-editor') { state.editingOrderId = null; state.orderDraft = null; }
   if (state.modal === 'market-editor') { state.editingMarketId = null; state.marketDraft = null; }
@@ -1059,6 +1104,7 @@ function bind() {
   document.querySelector('[data-save-order-delivery]')?.addEventListener('click', saveOrderDelivery);
   document.querySelector('#order-delivery')?.addEventListener('change', syncOrderDraftFromForm);
   bindModalScroll();
+  document.querySelectorAll('[data-batch-item]').forEach((button) => button.addEventListener('click', () => changeBatchQuantity(button.dataset.batchItem, Number(button.dataset.batchDelta))));
   document.querySelector('.modal-backdrop')?.addEventListener('click', (event) => {
     if (event.target !== event.currentTarget) return;
     closeActiveModal();
@@ -1089,7 +1135,7 @@ function bind() {
   document.querySelectorAll('[data-checkout-mode]').forEach((button) => button.addEventListener('click', () => { persistCheckoutDraft(); state.checkoutMode = button.dataset.checkoutMode; if (state.checkoutMode === 'general') state.checkoutDraft.customerId = null; saveCheckoutDraft(); render(); }));
   document.querySelector('#regular-customer')?.addEventListener('change', (event) => selectRegularCustomer(event.target.value));
   document.querySelector('[data-action="view-orders"]')?.addEventListener('click', () => { state.modal = null; state.view = 'orders'; render(); });
-  document.querySelector('[data-action="continue-shopping"]')?.addEventListener('click', () => { state.modal = null; state.view = 'shop'; render(); });
+  document.querySelector('[data-action="continue-shopping"]')?.addEventListener('click', continueShopping);
   document.querySelector('[data-action="export"]')?.addEventListener('click', exportExcel);
   document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', () => { state.adminTab = button.dataset.adminTab; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
   document.querySelectorAll('[data-order-history]').forEach((button) => button.addEventListener('click', () => { state.adminOrderHistory = button.dataset.orderHistory === 'history'; render(); }));
