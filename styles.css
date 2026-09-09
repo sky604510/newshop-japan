@@ -277,6 +277,11 @@ body.modal-open .pwa-install { display:none; }
 .procurement-thumb { width:44px; height:44px; overflow:hidden; display:grid; place-items:center; border:1px solid var(--line); border-radius:10px; background:var(--blush); color:var(--muted); font-size:8px; font-weight:800; }
 .procurement-thumb img { width:100%; height:100%; object-fit:contain; }
 .shipment-table td:first-child small { display:block; color:var(--muted); margin-top:4px; }
+.shipment-recipient-notes { display:grid; gap:8px; min-width:190px; margin-top:10px; }
+.shipment-recipient-notes label { display:grid; gap:5px; padding:8px; border:1px solid #f2b6ca; border-radius:11px; background:#fff0f5; }
+.shipment-recipient-notes label > span { color:var(--rose-deep); font-size:10px; font-weight:800; }
+.shipment-recipient-notes textarea { width:100%; min-width:170px; padding:8px; resize:vertical; border-radius:9px; background:white; font:inherit; font-size:12px; }
+.shipment-recipient-notes .btn { justify-self:start; padding:7px 10px; font-size:11px; }
 .shipment-items { display:grid; gap:8px; min-width:230px; }
 .shipment-item { display:grid; grid-template-columns:42px minmax(0,1fr); align-items:center; gap:9px; padding:5px; border:1px solid var(--line); border-radius:12px; background:#fffafd; }
 .shipment-item.selectable { grid-template-columns:22px 42px minmax(0,1fr); }
@@ -300,6 +305,9 @@ body.modal-open .pwa-install { display:none; }
 .shipment-date-group label { display:grid; gap:3px; }
 .shipment-date-group label span { max-width:170px; color:var(--muted); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .shipment-date-group input { min-width:145px; padding:7px; }
+.shipment-date-actions { display:flex; align-items:center; gap:6px; }
+.shipment-date-actions input { min-width:138px; }
+.shipment-restore { flex:0 0 auto; padding:8px 11px; color:var(--rose-deep); }
 .account-email { display:block; max-width:240px; margin-top:4px; color:var(--rose-deep); font-size:11px; overflow-wrap:anywhere; }
 .order-note { display:grid; gap:3px; min-width:140px; max-width:230px; margin-top:10px; padding:9px 11px; border:1px solid #f2b6ca; border-radius:10px; background:#fff0f5; color:var(--ink); white-space:pre-wrap; overflow-wrap:anywhere; }
 .order-note strong { color:var(--rose-deep); font-size:10px; letter-spacing:.06em; }

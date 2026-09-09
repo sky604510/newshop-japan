@@ -19,7 +19,7 @@ const state = {
   authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, shipmentHistory: false,
   procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true,
   operationsReady: true, costReady: true, pricingReady: true, adminOpsReady: true, orderEditorReady: true, sortingReady: true,
-  fulfillmentReady: true,
+  fulfillmentReady: true, shipmentNoteReady: true,
 };
 
 const money = (value) => `NT$ ${Number(value || 0).toLocaleString('zh-TW')}`;
@@ -312,7 +312,7 @@ function shipmentSummaries(history = false) {
       const product = state.products.find((entry) => entry.id === item.product_id);
       const unitCost = currentOrderItemCost(item); const quantity = Number(item.quantity); const amount = Number(item.unit_price) * quantity; const profit = amount - unitCost * quantity;
       const imageUrl = product?.image_url || '';
-      recipient.items.push({ id: item.id, order_id: order.id, order_number: order.order_number, name: item.product_name, image_url: imageUrl, quantity, amount, profit, shipped_at: fulfillment?.shipped_at || null });
+      recipient.items.push({ id: item.id, order_id: order.id, order_number: order.order_number, order_note: order.note || '', name: item.product_name, image_url: imageUrl, quantity, amount, profit, shipped_at: fulfillment?.shipped_at || null });
       recipient.amount += amount; recipient.profit += profit;
     }
   }
@@ -322,11 +322,15 @@ function shipmentSummaries(history = false) {
 function shipmentOrderGroups(recipient) {
   const groups = new Map();
   for (const item of recipient.items) {
-    if (!groups.has(item.order_id)) groups.set(item.order_id, { order_id: item.order_id, order_number: item.order_number, items: [], quantity: 0, amount: 0, profit: 0 });
+    if (!groups.has(item.order_id)) groups.set(item.order_id, { order_id: item.order_id, order_number: item.order_number, note: item.order_note || '', items: [], quantity: 0, amount: 0, profit: 0 });
     const group = groups.get(item.order_id);
     group.items.push(item); group.quantity += item.quantity; group.amount += item.amount; group.profit += item.profit;
   }
   return [...groups.values()];
+}
+
+function shipmentRecipientNotes(recipient) {
+  return `<div class="shipment-recipient-notes">${shipmentOrderGroups(recipient).map((group) => `<label><span>${esc(group.order_number)} 備註</span><textarea data-shipment-note-input="${group.order_id}" rows="2" placeholder="無備註">${esc(group.note)}</textarea><button class="btn btn-light" data-save-shipment-note="${group.order_id}" type="button">儲存備註</button></label>`).join('')}</div>`;
 }
 
 function shipmentOrderDetails(recipient, history = false) {
@@ -334,7 +338,7 @@ function shipmentOrderDetails(recipient, history = false) {
 }
 
 function shipmentDateControls(recipient) {
-  return shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label title="${esc(item.name)}"><span>${esc(item.name)}</span><input data-shipment-date="${item.id}" type="date" value="${esc(item.shipped_at || '')}" ${state.fulfillmentReady ? '' : 'disabled'}/></label>`).join('')}</div>`).join('');
+  return shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label title="${esc(item.name)}"><span>${esc(item.name)}</span><div class="shipment-date-actions"><input data-shipment-date="${item.id}" type="date" value="${esc(item.shipped_at || '')}" ${state.fulfillmentReady ? '' : 'disabled'}/><button class="btn btn-light shipment-restore" data-restore-shipment="${item.id}" type="button" ${state.fulfillmentReady ? '' : 'disabled'}>還原</button></div></label>`).join('')}</div>`).join('');
 }
 
 function orderItemSummary(item, showPurchaseCheck = false) {
@@ -392,10 +396,10 @@ function adminView() {
   const shipments = shipmentSummaries(state.shipmentHistory);
   const shipmentRows = shipments.map((recipient) => {
     const selectedCount = recipient.items.filter((item) => state.shipmentSelection.has(item.id)).length;
-    return `<tr><td><strong>${esc(recipient.recipient)}</strong><small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small></td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentHistory)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td><td>${state.shipmentHistory ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<button class="btn btn-primary shipment-send" data-ship-recipient="${esc(recipient.key)}" ${selectedCount && state.fulfillmentReady ? '' : 'disabled'}>發貨${selectedCount ? `（${selectedCount}）` : ''}</button>`}</td></tr>`;
+    return `<tr><td><strong>${esc(recipient.recipient)}</strong><small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentHistory)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td><td>${state.shipmentHistory ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<button class="btn btn-primary shipment-send" data-ship-recipient="${esc(recipient.key)}" ${selectedCount && state.fulfillmentReady ? '' : 'disabled'}>發貨${selectedCount ? `（${selectedCount}）` : ''}</button>`}</td></tr>`;
   }).join('');
   const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
-  const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}`;
+  const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}`;
   const orderPanel = `<section class="panel order-panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史清單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整訂單 →</div><div class="table-wrap order-table-wrap"><table class="admin-table order-management-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
   const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div><div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div></section>`;
   const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.shipmentHistory ? 'active' : ''}" data-shipment-history="current">待發貨</button><button class="${state.shipmentHistory ? 'active' : ''}" data-shipment-history="history">歷史清單</button></div>${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th><th>${state.shipmentHistory ? '發貨日期' : '操作'}</th></tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentHistory ? '目前沒有發貨歷史' : '目前沒有待發貨商品'}</div>`}</section>`;
@@ -1093,6 +1097,28 @@ async function updateShipmentDate(orderItemId, shippedAt) {
   renderToast('發貨日期已更新');
 }
 
+async function restoreShipmentItem(orderItemId) {
+  const { error } = await supabase.rpc('admin_restore_order_item', { p_order_item_id: orderItemId });
+  if (error) { renderToast(friendlyError(error)); return; }
+  const current = state.fulfillmentChecks.get(orderItemId) || { order_item_id: orderItemId, purchase_confirmed: false };
+  state.fulfillmentChecks.set(orderItemId, { ...current, shipped_at: null });
+  render(); renderToast('商品已還原至待發貨清單');
+}
+
+async function saveShipmentOrderNote(orderId) {
+  const input = document.querySelector(`[data-shipment-note-input="${orderId}"]`);
+  const note = input?.value.trim() || '';
+  const { error } = await supabase.rpc('admin_update_order_note', { p_order_id: orderId, p_note: note });
+  if (error) {
+    if (/admin_update_order_note|schema cache|could not find/i.test(error.message || '')) state.shipmentNoteReady = false;
+    render(); renderToast(friendlyError(error)); return;
+  }
+  state.shipmentNoteReady = true;
+  const order = state.orders.find((entry) => entry.id === orderId);
+  if (order) order.note = note;
+  render(); renderToast(note ? '訂單備註已更新' : '訂單備註已清除');
+}
+
 async function createCustomer() {
   const payload = {
     recipient_name: document.querySelector('#new-customer-name')?.value.trim(),
@@ -1224,6 +1250,8 @@ function bind() {
   document.querySelectorAll('[data-shipment-select]').forEach((input) => input.addEventListener('change', () => toggleShipmentSelection(input.dataset.shipmentSelect, input.dataset.shipmentGroup, input.checked)));
   document.querySelectorAll('[data-ship-recipient]').forEach((button) => button.addEventListener('click', () => shipRecipient(button.dataset.shipRecipient)));
   document.querySelectorAll('[data-shipment-date]').forEach((input) => input.addEventListener('change', () => updateShipmentDate(input.dataset.shipmentDate, input.value)));
+  document.querySelectorAll('[data-restore-shipment]').forEach((button) => button.addEventListener('click', () => restoreShipmentItem(button.dataset.restoreShipment)));
+  document.querySelectorAll('[data-save-shipment-note]').forEach((button) => button.addEventListener('click', () => saveShipmentOrderNote(button.dataset.saveShipmentNote)));
   document.querySelector('[data-action="new-customer"]')?.addEventListener('click', () => { state.customerDraft = null; state.modal = 'customer-editor'; render(); });
   document.querySelector('[data-action="create-customer"]')?.addEventListener('click', createCustomer);
   document.querySelectorAll('[data-save-customer]').forEach((button) => button.addEventListener('click', () => saveCustomer(button.dataset.saveCustomer)));
