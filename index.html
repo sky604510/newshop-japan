@@ -3,56 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#df7e9d" />
-    <meta name="description" content="NewShop連線代購，精選連線選物與少量預購賣場。" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="NewShop" />
-    <link rel="manifest" href="/manifest.webmanifest?v=2" />
-    <link rel="apple-touch-icon" href="/assets/app-center-180.png" />
-    <link rel="icon" type="image/png" href="/assets/logo_v2.png?v=1" />
-    <title>NewShop連線代購</title>
-    <link rel="stylesheet" href="./styles.css?v=17" />
-    <script src="/pwa.js?v=17" defer></script>
+    <meta name="theme-color" content="#12372a" />
+    <title>NewShop日本連線代購｜線上訂購網</title>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div id="brand-intro" class="brand-intro" aria-hidden="true">
-      <div class="brand-intro-card">
-        <span class="brand-intro-ring"></span>
-        <img src="/assets/logo_v2.png?v=1" alt="" />
-        <strong>NewShop連線代購</strong>
-      </div>
-    </div>
-    <script>
-      (() => {
-        const intro = document.querySelector('#brand-intro');
-        const logo = intro?.querySelector('img');
-        if (!intro) return;
-
-        let started = false;
-        const play = () => {
-          if (started) return;
-          if (document.hidden) {
-            document.addEventListener('visibilitychange', play, { once: true });
-            return;
-          }
-          started = true;
-          requestAnimationFrame(() => intro.classList.add('is-playing'));
-          intro.addEventListener('animationend', (event) => {
-            if (event.target === intro) intro.remove();
-          });
-          window.setTimeout(() => intro.remove(), 3400);
-        };
-
-        if (logo?.complete) play();
-        else {
-          logo?.addEventListener('load', play, { once: true });
-          window.setTimeout(play, 700);
-        }
-      })();
-    </script>
     <div id="app"></div>
-    <script type="module" src="./app.js?v=17"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>
