@@ -492,6 +492,7 @@ function createMarketDraft(market) {
     name: market?.name || '', description: market?.description || '', image_url: market?.image_url || '', file: null, removeBg: false, imageRemoved: false,
     closes_at: dateValue(market?.closes_at) || dateValue(defaultClose),
     is_active: market?.is_active ?? true, sort_order: market?.sort_order || 0,
+    deletedProducts: [],
     products: (market?.products || []).map((item, index) => ({ ...item, key: item.id, sort_order: item.sort_order ?? index, file: null, removeBg: false, imageRemoved: false })),
   };
 }
@@ -869,7 +870,7 @@ async function saveMarket() {
   if (!isManager()) return;
   if (!state.costReady) { renderToast('請先在 Supabase 執行 product_cost_upgrade.sql'); return; }
   syncMarketDraftFromForm();
-  const draft = state.marketDraft; const items = draft.products; const marketImage = draft.file;
+  const draft = state.marketDraft; const items = draft.products; const deletedProducts = draft.deletedProducts || []; const marketImage = draft.file;
   if (!draft.name || !draft.closes_at || !items.length) { renderToast('請填寫賣場名稱、截止日期，並建立至少一個品項'); return; }
   if (items.some((item) => !item.name || !Number.isFinite(Number(item.foreign_cost)) || Number(item.foreign_cost) < 0 || !Number.isFinite(Number(item.exchange_rate)) || Number(item.exchange_rate) < 0 || !Number.isFinite(Number(item.cost)) || Number(item.cost) < 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0 || !Number.isInteger(Number(item.stock)) || Number(item.stock) < 0)) { renderToast('請正確填寫每個品項的外幣成本、匯率、成本、售價與數量'); return; }
   const saveButton = document.querySelector('[data-action="save-market"]');
@@ -904,6 +905,13 @@ async function saveMarket() {
       const { error: costError } = await supabase.rpc('admin_set_product_costs', { p_product_id: result.data.id, p_foreign_cost: foreignCost, p_exchange_rate: exchangeRate, p_cost: localCost, p_apply_to_unset_history: true });
       if (costError) throw costError;
     }
+    for (const item of deletedProducts) {
+      if (item.image_url) {
+        const path = storedImagePath(item.image_url); if (path) removedImagePaths.push(path);
+      }
+      const { error } = await supabase.from('products').delete().eq('id', item.id);
+      if (error) throw error;
+    }
     if (removedImagePaths.length) await supabase.storage.from('product-images').remove([...new Set(removedImagePaths)]);
     await loadMarkets(); await loadProductCosts(); state.modal = null; state.marketDraft = null; state.editingMarketId = null; successMessage = existing ? '賣場與品項已更新' : '賣場已建立';
   } catch (error) { renderToast(friendlyError(error)); }
@@ -923,12 +931,9 @@ async function deleteProductFromEditor(key, productId) {
   }
   const product = state.marketDraft.products.find((item) => item.key === key);
   if (!window.confirm(`確定刪除「${product?.name || '這個商品'}」嗎？既有訂單紀錄會保留。`)) return;
-  const preservedDraft = { ...state.marketDraft, products: state.marketDraft.products.filter((item) => item.key !== key) };
-  const { error } = await supabase.from('products').delete().eq('id', productId);
-  if (error) { renderToast(friendlyError(error)); return; }
-  await loadMarkets(); await loadProductCosts();
-  state.marketDraft = preservedDraft;
-  removeMarketDraftRow(key); renderToast('商品已刪除');
+  state.marketDraft.deletedProducts = [...(state.marketDraft.deletedProducts || []), product];
+  state.marketDraft.products = state.marketDraft.products.filter((item) => item.key !== key);
+  removeMarketDraftRow(key); renderToast('已標記刪除，儲存後才會生效');
 }
 
 async function deleteMarket(id) {
