@@ -1228,9 +1228,19 @@ async function exportShipmentExcel() {
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
     const workbook = XLSX.utils.book_new();
     const rows = shipmentExportRows(history);
-    const sheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 提示: `目前沒有${label}資料` }]);
+    const recipients = shipmentSummaries(history);
+    const totals = { 總數量: rows.reduce((sum, row) => sum + row.數量, 0), 總金額: rows.reduce((sum, row) => sum + row.金額, 0), 總獲利: rows.reduce((sum, row) => sum + row.獲利, 0) };
+    const details = rows.length ? [...rows, { 收件人: '全部總計', 數量: totals.總數量, 金額: totals.總金額, 獲利: totals.總獲利 }] : [{ 提示: `目前沒有${label}資料` }];
+    const sheet = XLSX.utils.json_to_sheet(details);
     sheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 16 }, { wch: 20 }, { wch: 18 }, { wch: 26 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, ...(history ? [{ wch: 14 }] : [])];
     XLSX.utils.book_append_sheet(workbook, sheet, label);
+    if (history) {
+      const summaryRows = recipients.map((recipient) => ({ 收件人: recipient.recipient, 總數量: recipient.items.reduce((sum, item) => sum + item.quantity, 0), 總金額: recipient.amount, 總獲利: recipient.profit }));
+      if (summaryRows.length) summaryRows.push({ 收件人: '全部總計', ...totals });
+      const summarySheet = XLSX.utils.json_to_sheet(summaryRows.length ? summaryRows : [{ 提示: '目前沒有發貨歷史資料' }]);
+      summarySheet['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 16 }];
+      XLSX.utils.book_append_sheet(workbook, summarySheet, '收件人總計');
+    }
     XLSX.writeFile(workbook, `NewShop${label}-${new Date().toLocaleDateString('en-CA')}.xlsx`);
   } catch (error) { renderToast(`Excel 產生失敗：${friendlyError(error)}`); }
 }
