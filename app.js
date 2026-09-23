@@ -402,7 +402,7 @@ function adminView() {
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}`;
   const orderPanel = `<section class="panel order-panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史清單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整訂單 →</div><div class="table-wrap order-table-wrap"><table class="admin-table order-management-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
   const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div><div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div></section>`;
-  const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.shipmentHistory ? 'active' : ''}" data-shipment-history="current">待發貨</button><button class="${state.shipmentHistory ? 'active' : ''}" data-shipment-history="history">歷史清單</button></div>${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th><th>${state.shipmentHistory ? '發貨日期' : '操作'}</th></tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentHistory ? '目前沒有發貨歷史' : '目前沒有待發貨商品'}</div>`}</section>`;
+  const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><button class="btn btn-primary" data-action="export-shipment">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.shipmentHistory ? 'active' : ''}" data-shipment-history="current">待發貨</button><button class="${state.shipmentHistory ? 'active' : ''}" data-shipment-history="history">歷史清單</button></div>${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th><th>${state.shipmentHistory ? '發貨日期' : '操作'}</th></tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentHistory ? '目前沒有發貨歷史' : '目前沒有待發貨商品'}</div>`}</section>`;
   const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>只有收件人為必填，信箱與電話皆可留空。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>信箱（選填）</th><th>電話（選填）</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
   const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>拖曳調整同一區內的順序；可同時置頂多個賣場。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table market-sort-table"><thead><tr><th>排序</th><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody id="market-sort-list">${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
   const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, customers: customerPanel, markets: marketPanel };
@@ -1212,6 +1212,29 @@ function safeSheetName(name, usedNames) {
   usedNames.add(result); return result;
 }
 
+function shipmentExportRows(history) {
+  return shipmentSummaries(history).flatMap((recipient) => recipient.items.map((item) => ({
+    收件人: recipient.recipient, 下單帳號: recipient.account, 聯絡電話: recipient.phone,
+    取貨方式: recipient.delivery, 訂單編號: item.order_number, 訂單備註: item.order_note,
+    訂購商品: item.name, 數量: item.quantity, 金額: item.amount, 獲利: item.profit,
+    ...(history ? { 發貨日期: item.shipped_at } : {}),
+  })));
+}
+
+async function exportShipmentExcel() {
+  try {
+    const history = state.shipmentHistory;
+    const label = history ? '發貨歷史清單' : '待發貨清單';
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+    const workbook = XLSX.utils.book_new();
+    const rows = shipmentExportRows(history);
+    const sheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 提示: `目前沒有${label}資料` }]);
+    sheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 16 }, { wch: 20 }, { wch: 18 }, { wch: 26 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, ...(history ? [{ wch: 14 }] : [])];
+    XLSX.utils.book_append_sheet(workbook, sheet, label);
+    XLSX.writeFile(workbook, `NewShop${label}-${new Date().toLocaleDateString('en-CA')}.xlsx`);
+  } catch (error) { renderToast(`Excel 產生失敗：${friendlyError(error)}`); }
+}
+
 async function exportExcel() {
   try {
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
@@ -1293,6 +1316,7 @@ function bind() {
   document.querySelector('[data-action="view-orders"]')?.addEventListener('click', () => { state.modal = null; state.view = 'orders'; render(); });
   document.querySelector('[data-action="continue-shopping"]')?.addEventListener('click', continueShopping);
   document.querySelector('[data-action="export"]')?.addEventListener('click', exportExcel);
+  document.querySelector('[data-action="export-shipment"]')?.addEventListener('click', exportShipmentExcel);
   document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', () => { state.adminTab = button.dataset.adminTab; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
   document.querySelectorAll('[data-order-history]').forEach((button) => button.addEventListener('click', () => { state.adminOrderHistory = button.dataset.orderHistory === 'history'; render(); }));
   document.querySelectorAll('[data-procurement-history]').forEach((button) => button.addEventListener('click', () => { state.procurementHistory = button.dataset.procurementHistory === 'history'; render(); }));
