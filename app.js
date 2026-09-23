@@ -496,10 +496,14 @@ function createMarketDraft(market) {
   };
 }
 
+function marketItemRow(item, index) {
+  return `<div class="item-editor compact-item" data-item-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><button class="item-index drag-handle" data-item-drag aria-label="拖曳調整 ${esc(item.name || `品項 ${index + 1}`)} 排序" title="拖曳排序" ${state.sortingReady ? '' : 'disabled'}>${index + 1}</button><label class="compact-input item-name"><span>商品名稱</span><input data-item-name value="${esc(item.name || '')}" placeholder="商品或規格名稱"/></label><label class="compact-input"><span>外幣成本</span><input data-item-foreign-cost type="number" min="0" step="0.01" value="${item.foreign_cost ?? 0}"/></label><label class="compact-input"><span>匯率</span><input data-item-exchange-rate type="number" min="0" step="0.0001" value="${item.exchange_rate ?? 0}"/></label><label class="compact-input"><span>成本</span><input data-item-cost type="number" min="0" step="0.01" value="${item.cost ?? 0}"/></label><label class="compact-input"><span>售價</span><input data-item-price type="number" min="0" value="${item.price ?? ''}"/></label><label class="compact-input"><span>數量</span><input data-item-stock type="number" min="0" step="1" value="${item.stock ?? 0}"/></label><div class="compact-image"><span class="upload-thumb">${item.file ? `<img src="${URL.createObjectURL(item.file)}" alt="預覽"/>` : item.image_url ? `<img src="${esc(item.image_url)}" alt="預覽"/>` : ''}</span><label class="image-pick" title="選擇商品圖片">＋<input data-item-image type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><button class="image-clear" type="button" data-clear-item-image="${esc(item.key)}" title="刪除商品圖片" aria-label="刪除 ${esc(item.name || `品項 ${index + 1}`)} 的圖片" ${(item.file || item.image_url) ? '' : 'disabled'}>×</button><label class="remove-bg-mini" title="自動去除淺色背景"><input data-item-remove-bg type="checkbox" ${item.removeBg ? 'checked' : ''}/>去背</label></div><label class="mini-switch"><input data-item-active type="checkbox" ${item.is_active !== false ? 'checked' : ''}/><span>上架</span></label><button class="item-delete" data-remove-draft-item="${esc(item.key)}" data-product-id="${esc(item.id || '')}" title="刪除商品" aria-label="刪除 ${esc(item.name || `品項 ${index + 1}`)}">×</button></div>`;
+}
+
 function marketEditorModal() {
   const draft = state.marketDraft || createMarketDraft();
-  const rows = draft.products.map((item, index) => `<div class="item-editor compact-item" data-item-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><button class="item-index drag-handle" data-item-drag aria-label="拖曳調整 ${esc(item.name || `品項 ${index + 1}`)} 排序" title="拖曳排序" ${state.sortingReady ? '' : 'disabled'}>${index + 1}</button><label class="compact-input item-name"><span>商品名稱</span><input data-item-name value="${esc(item.name || '')}" placeholder="商品或規格名稱"/></label><label class="compact-input"><span>外幣成本</span><input data-item-foreign-cost type="number" min="0" step="0.01" value="${item.foreign_cost ?? 0}"/></label><label class="compact-input"><span>匯率</span><input data-item-exchange-rate type="number" min="0" step="0.0001" value="${item.exchange_rate ?? 0}"/></label><label class="compact-input"><span>成本</span><input data-item-cost type="number" min="0" step="0.01" value="${item.cost ?? 0}"/></label><label class="compact-input"><span>售價</span><input data-item-price type="number" min="0" value="${item.price ?? ''}"/></label><label class="compact-input"><span>數量</span><input data-item-stock type="number" min="0" step="1" value="${item.stock ?? 0}"/></label><div class="compact-image"><span class="upload-thumb">${item.file ? `<img src="${URL.createObjectURL(item.file)}" alt="預覽"/>` : item.image_url ? `<img src="${esc(item.image_url)}" alt="預覽"/>` : ''}</span><label class="image-pick" title="選擇商品圖片">＋<input data-item-image type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><button class="image-clear" type="button" data-clear-item-image="${esc(item.key)}" title="刪除商品圖片" aria-label="刪除 ${esc(item.name || `品項 ${index + 1}`)} 的圖片" ${(item.file || item.image_url) ? '' : 'disabled'}>×</button><label class="remove-bg-mini" title="自動去除淺色背景"><input data-item-remove-bg type="checkbox" ${item.removeBg ? 'checked' : ''}/>去背</label></div><label class="mini-switch"><input data-item-active type="checkbox" ${item.is_active !== false ? 'checked' : ''}/><span>上架</span></label><button class="item-delete" data-remove-draft-item="${esc(item.key)}" data-product-id="${esc(item.id || '')}" title="刪除商品" aria-label="刪除 ${esc(item.name || `品項 ${index + 1}`)}">×</button></div>`).join('');
-  return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="market-basic-grid"><div class="field"><label>賣場名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購"/></div><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="2">${esc(draft.description)}</textarea></div><div class="market-cover-compact"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : ''}</span><label class="btn btn-light image-button">選擇封面<input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><button class="btn btn-light image-clear-market" type="button" data-clear-market-image ${(draft.file || draft.image_url) ? '' : 'disabled'}>刪除圖片</button><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去背</label><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>立即上架</span></label></div><div class="editor-divider"><div><strong>商品／規格</strong><small>同一列完成名稱、成本、售價、數量與圖片</small></div><button class="btn btn-light" data-action="add-draft-item">＋ 新增選項</button></div><div class="item-editors compact-list">${rows || `<div class="empty">請先新增至少一個商品</div>`}</div><div class="editor-save-bar"><span>共 ${draft.products.length} 個商品</span><div class="editor-save-actions"><button class="btn btn-light" data-action="cancel-market">取消</button><button class="btn btn-primary" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與商品'}</button></div></div></div></div>`;
+  const rows = draft.products.map(marketItemRow).join('');
+  return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="market-basic-grid"><div class="field"><label>賣場名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購"/></div><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="2">${esc(draft.description)}</textarea></div><div class="market-cover-compact"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : ''}</span><label class="btn btn-light image-button">選擇封面<input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><button class="btn btn-light image-clear-market" type="button" data-clear-market-image ${(draft.file || draft.image_url) ? '' : 'disabled'}>刪除圖片</button><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去背</label><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>立即上架</span></label></div><div class="editor-divider"><div><strong>商品／規格</strong><small>同一列完成名稱、成本、售價、數量與圖片</small></div></div><div class="item-editors compact-list">${rows || `<div class="empty">請先新增至少一個商品</div>`}</div><div class="editor-save-bar"><div class="editor-item-tools"><span data-market-item-count>共 ${draft.products.length} 個商品</span><button class="btn btn-light" data-action="add-draft-item">＋ 新增選項</button></div><div class="editor-save-actions"><button class="btn btn-light" data-action="cancel-market">取消</button><button class="btn btn-primary" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與商品'}</button></div></div></div></div>`;
 }
 
 function imagePreviewModal() {
@@ -586,7 +590,10 @@ function previewSelectedImage(input) {
 
 function bindPointerSort(container, rowSelector, handleSelector, onSorted, keepWithinGroup = false) {
   if (!container) return;
-  container.querySelectorAll(handleSelector).forEach((handle) => handle.addEventListener('pointerdown', (startEvent) => {
+  container.querySelectorAll(handleSelector).forEach((handle) => {
+    if (handle.dataset.sortBound === 'true') return;
+    handle.dataset.sortBound = 'true';
+    handle.addEventListener('pointerdown', (startEvent) => {
     if (handle.disabled) return;
     const dragged = handle.closest(rowSelector); if (!dragged) return;
     const group = dragged.dataset.sortGroup; let moved = false;
@@ -608,7 +615,8 @@ function bindPointerSort(container, rowSelector, handleSelector, onSorted, keepW
     document.addEventListener('pointermove', move, { passive: false });
     document.addEventListener('pointerup', end, { once: true });
     document.addEventListener('pointercancel', end, { once: true });
-  }));
+    });
+  });
 }
 
 function openMarket(id) {
@@ -818,6 +826,23 @@ function autoCalculateLocalCost(row) {
   const foreignInput = row.querySelector('[data-item-foreign-cost]'); const rateInput = row.querySelector('[data-item-exchange-rate]'); const costInput = row.querySelector('[data-item-cost]');
   const foreignCost = Number(foreignInput?.value); const exchangeRate = Number(rateInput?.value); const localCost = Number(costInput?.value);
   if (costInput && localCost === 0 && foreignCost > 0 && exchangeRate > 0) costInput.value = String(Math.round(foreignCost * exchangeRate * 100) / 100);
+}
+
+function appendMarketDraftItem() {
+  syncMarketDraftFromForm();
+  const item = { key: crypto.randomUUID(), sort_order: state.marketDraft.products.length, name: '', foreign_cost: 0, exchange_rate: 0, cost: 0, price: '', stock: 0, is_active: true, file: null, removeBg: false, imageRemoved: false };
+  state.marketDraft.products.push(item);
+  const list = document.querySelector('.item-editors'); if (!list) return;
+  list.querySelector('.empty')?.remove();
+  list.insertAdjacentHTML('beforeend', marketItemRow(item, state.marketDraft.products.length - 1));
+  const row = list.lastElementChild;
+  document.querySelector('[data-market-item-count]').textContent = `共 ${state.marketDraft.products.length} 個商品`;
+  row.querySelector('[data-remove-draft-item]')?.addEventListener('click', (event) => deleteProductFromEditor(event.currentTarget.dataset.removeDraftItem, event.currentTarget.dataset.productId));
+  row.querySelector('[data-clear-item-image]')?.addEventListener('click', (event) => clearItemImage(event.currentTarget.dataset.clearItemImage));
+  row.querySelector('[data-item-image]')?.addEventListener('change', (event) => previewSelectedImage(event.currentTarget));
+  row.querySelectorAll('[data-item-foreign-cost],[data-item-exchange-rate]').forEach((input) => input.addEventListener('change', () => autoCalculateLocalCost(row)));
+  bindPointerSort(list, '[data-item-row]', '[data-item-drag]', (rows) => { rows.forEach((entry, index) => { const handle = entry.querySelector('[data-item-drag]'); if (handle) handle.textContent = index + 1; }); syncMarketDraftFromForm(); });
+  row.querySelector('[data-item-name]')?.focus({ preventScroll: true });
 }
 
 function openMarketEditor(id = null) {
@@ -1262,7 +1287,7 @@ function bind() {
   document.querySelectorAll('[data-delete-market]').forEach((button) => button.addEventListener('click', () => deleteMarket(button.dataset.deleteMarket)));
   document.querySelectorAll('[data-pin-market]').forEach((button) => button.addEventListener('click', () => toggleMarketPin(button.dataset.pinMarket)));
   bindPointerSort(document.querySelector('#market-sort-list'), '[data-market-sort]', '[data-market-drag]', saveMarketOrder, true);
-  document.querySelector('[data-action="add-draft-item"]')?.addEventListener('click', () => { syncMarketDraftFromForm(); state.marketDraft.products.push({ key: crypto.randomUUID(), sort_order: state.marketDraft.products.length, name: '', foreign_cost: 0, exchange_rate: 0, cost: 0, price: '', stock: 0, is_active: true, file: null, removeBg: false, imageRemoved: false }); render(); });
+  document.querySelector('[data-action="add-draft-item"]')?.addEventListener('click', appendMarketDraftItem);
   document.querySelectorAll('[data-remove-draft-item]').forEach((button) => button.addEventListener('click', () => deleteProductFromEditor(button.dataset.removeDraftItem, button.dataset.productId)));
   document.querySelector('[data-clear-market-image]')?.addEventListener('click', clearMarketImage);
   document.querySelectorAll('[data-clear-item-image]').forEach((button) => button.addEventListener('click', () => clearItemImage(button.dataset.clearItemImage)));
