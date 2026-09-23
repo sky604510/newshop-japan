@@ -812,14 +812,19 @@ function syncMarketDraftFromForm() {
 function clearMarketImage() {
   syncMarketDraftFromForm();
   state.marketDraft.file = null; state.marketDraft.image_url = ''; state.marketDraft.imageRemoved = true;
-  render();
+  const input = document.querySelector('#market-image'); if (input) input.value = '';
+  document.querySelector('.market-cover-compact .upload-thumb')?.replaceChildren();
+  const button = document.querySelector('[data-clear-market-image]'); if (button) button.disabled = true;
 }
 
 function clearItemImage(key) {
   syncMarketDraftFromForm();
   const item = state.marketDraft.products.find((entry) => entry.key === key); if (!item) return;
   item.file = null; item.image_url = ''; item.imageRemoved = true;
-  render();
+  const row = [...document.querySelectorAll('[data-item-row]')].find((entry) => entry.dataset.key === key); if (!row) return;
+  const input = row.querySelector('[data-item-image]'); if (input) input.value = '';
+  row.querySelector('.upload-thumb')?.replaceChildren();
+  const button = row.querySelector('[data-clear-item-image]'); if (button) button.disabled = true;
 }
 
 function autoCalculateLocalCost(row) {
@@ -845,6 +850,16 @@ function appendMarketDraftItem() {
   row.querySelector('[data-item-name]')?.focus({ preventScroll: true });
 }
 
+function removeMarketDraftRow(key) {
+  const list = document.querySelector('.item-editors'); if (!list) return;
+  const row = [...list.querySelectorAll('[data-item-row]')].find((entry) => entry.dataset.key === key);
+  row?.remove();
+  const rows = [...list.querySelectorAll('[data-item-row]')];
+  rows.forEach((entry, index) => { const handle = entry.querySelector('[data-item-drag]'); if (handle) handle.textContent = index + 1; });
+  if (!rows.length) list.innerHTML = '<div class="empty">請先新增至少一個商品</div>';
+  const count = document.querySelector('[data-market-item-count]'); if (count) count.textContent = `共 ${state.marketDraft.products.length} 個商品`;
+}
+
 function openMarketEditor(id = null) {
   if (!state.marketFeatureReady) { renderToast('請先執行賣場升級 SQL'); return; }
   const market = state.markets.find((item) => item.id === id); state.editingMarketId = id; state.marketDraft = createMarketDraft(market); state.modal = 'market-editor'; render();
@@ -857,7 +872,10 @@ async function saveMarket() {
   const draft = state.marketDraft; const items = draft.products; const marketImage = draft.file;
   if (!draft.name || !draft.closes_at || !items.length) { renderToast('請填寫賣場名稱、截止日期，並建立至少一個品項'); return; }
   if (items.some((item) => !item.name || !Number.isFinite(Number(item.foreign_cost)) || Number(item.foreign_cost) < 0 || !Number.isFinite(Number(item.exchange_rate)) || Number(item.exchange_rate) < 0 || !Number.isFinite(Number(item.cost)) || Number(item.cost) < 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0 || !Number.isInteger(Number(item.stock)) || Number(item.stock) < 0)) { renderToast('請正確填寫每個品項的外幣成本、匯率、成本、售價與數量'); return; }
-  state.busy = true; render();
+  const saveButton = document.querySelector('[data-action="save-market"]');
+  state.busy = true;
+  if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
+  let successMessage = '';
   try {
     const existing = state.markets.find((item) => item.id === state.editingMarketId);
     const removedImagePaths = [];
@@ -887,9 +905,13 @@ async function saveMarket() {
       if (costError) throw costError;
     }
     if (removedImagePaths.length) await supabase.storage.from('product-images').remove([...new Set(removedImagePaths)]);
-    await loadMarkets(); await loadProductCosts(); state.modal = null; state.marketDraft = null; state.editingMarketId = null; renderToast(existing ? '賣場與品項已更新' : '賣場已建立');
+    await loadMarkets(); await loadProductCosts(); state.modal = null; state.marketDraft = null; state.editingMarketId = null; successMessage = existing ? '賣場與品項已更新' : '賣場已建立';
   } catch (error) { renderToast(friendlyError(error)); }
-  finally { state.busy = false; render(); }
+  finally {
+    state.busy = false;
+    if (successMessage) { render(); renderToast(successMessage); }
+    else if (saveButton) { saveButton.disabled = false; saveButton.textContent = '儲存賣場與商品'; }
+  }
 }
 
 async function deleteProductFromEditor(key, productId) {
@@ -897,7 +919,7 @@ async function deleteProductFromEditor(key, productId) {
   syncMarketDraftFromForm();
   if (!productId) {
     state.marketDraft.products = state.marketDraft.products.filter((item) => item.key !== key);
-    render(); return;
+    removeMarketDraftRow(key); return;
   }
   const product = state.marketDraft.products.find((item) => item.key === key);
   if (!window.confirm(`確定刪除「${product?.name || '這個商品'}」嗎？既有訂單紀錄會保留。`)) return;
@@ -906,7 +928,7 @@ async function deleteProductFromEditor(key, productId) {
   if (error) { renderToast(friendlyError(error)); return; }
   await loadMarkets(); await loadProductCosts();
   state.marketDraft = preservedDraft;
-  render(); renderToast('商品已刪除');
+  removeMarketDraftRow(key); renderToast('商品已刪除');
 }
 
 async function deleteMarket(id) {
