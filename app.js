@@ -1251,6 +1251,34 @@ function shipmentRecipientMerges(recipients) {
   });
 }
 
+function shipmentPackingSheet(XLSX, recipients) {
+  const rows = [];
+  const merges = [];
+  recipients.forEach((recipient, index) => {
+    if (index) rows.push([]);
+    rows.push(['收件人', '訂購商品', '數量', '金額', '總金額', '訂單備註']);
+    const recipientStart = rows.length;
+    for (const group of shipmentOrderGroups(recipient)) {
+      const orderStart = rows.length;
+      group.items.forEach((item, itemIndex) => rows.push([
+        rows.length === recipientStart ? recipient.recipient : '',
+        item.name, item.quantity, item.amount,
+        rows.length === recipientStart ? recipient.amount : '',
+        itemIndex === 0 ? group.note : '',
+      ]));
+      if (group.note && group.items.length > 1) merges.push({ s: { r: orderStart, c: 5 }, e: { r: rows.length - 1, c: 5 } });
+    }
+    if (recipient.items.length > 1) {
+      merges.push({ s: { r: recipientStart, c: 0 }, e: { r: rows.length - 1, c: 0 } });
+      merges.push({ s: { r: recipientStart, c: 4 }, e: { r: rows.length - 1, c: 4 } });
+    }
+  });
+  const sheet = XLSX.utils.aoa_to_sheet(rows.length ? rows : [['收件人', '訂購商品', '數量', '金額', '總金額', '訂單備註']]);
+  sheet['!merges'] = merges;
+  sheet['!cols'] = [{ wch: 20 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 38 }];
+  return sheet;
+}
+
 async function exportShipmentExcel() {
   try {
     const view = state.shipmentView;
@@ -1263,7 +1291,8 @@ async function exportShipmentExcel() {
     sheet['!merges'] = shipmentRecipientMerges(recipients);
     sheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 16 }, { wch: 20 }, { wch: 18 }, { wch: 26 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, ...(view !== 'pending' ? [{ wch: 14 }] : [])];
     XLSX.utils.book_append_sheet(workbook, sheet, label);
-    XLSX.writeFile(workbook, `NewShop${label}-${new Date().toLocaleDateString('en-CA')}.xlsx`);
+    if (view === 'shipped') XLSX.utils.book_append_sheet(workbook, shipmentPackingSheet(XLSX, recipients), '出貨清單');
+    XLSX.writeFile(workbook, `NewShop${label}-${new Date().toLocaleDateString('en-CA')}.xlsx`, { cellStyles: true });
   } catch (error) { renderToast(`Excel 產生失敗：${friendlyError(error)}`); }
 }
 
