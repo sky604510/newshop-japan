@@ -55,6 +55,7 @@ function friendlyError(error) {
   if (/insufficient_stock/i.test(message)) return '商品庫存不足，請重新確認數量';
   if (/order_empty/i.test(message)) return '訂單至少需要保留一個商品';
   if (/product_not_available/i.test(message)) return '部分品項已下架，請重新整理購物車';
+  if (/duplicate_product_name/i.test(message)) return '同一賣場不能有相同名稱的商品';
   if (/login_required/i.test(message)) return '請先登入會員';
   return message;
 }
@@ -282,12 +283,22 @@ function currentOrderItemCost(item) {
   return Number(item.unit_cost ?? product?.cost ?? 0);
 }
 
+function duplicateProductName(items) {
+  const names = new Set();
+  for (const item of items) {
+    const name = item.name.trim().toLocaleLowerCase();
+    if (names.has(name)) return item.name.trim();
+    names.add(name);
+  }
+  return null;
+}
+
 function marketSummaries(includeZero = false) {
   return state.markets.map((market) => ({
     market,
     rows: market.products.map((product) => {
       const itemOrders = state.orders.filter((order) => order.status !== 'cancelled').flatMap((order) =>
-        (order.order_items || []).filter((item) => item.product_id === product.id || (item.market_id === market.id && item.product_name === product.name)).map((item) => ({ ...item, order })),
+        (order.order_items || []).filter((item) => item.product_id === product.id).map((item) => ({ ...item, order })),
       );
       const quantity = itemOrders.reduce((sum, item) => sum + Number(item.quantity), 0); const currentCost = Number(product.cost || 0);
       const revenue = itemOrders.reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
@@ -890,6 +901,8 @@ async function saveMarket() {
   const draft = state.marketDraft; const items = draft.products; const deletedProducts = draft.deletedProducts || []; const marketImage = draft.file;
   if (!draft.name || !draft.closes_at || !items.length) { renderToast('請填寫賣場名稱、截止日期，並建立至少一個品項'); return; }
   if (items.some((item) => !item.name || !Number.isFinite(Number(item.foreign_cost)) || Number(item.foreign_cost) < 0 || !Number.isFinite(Number(item.exchange_rate)) || Number(item.exchange_rate) < 0 || !Number.isFinite(Number(item.cost)) || Number(item.cost) < 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0 || !Number.isInteger(Number(item.stock)) || Number(item.stock) < 0)) { renderToast('請正確填寫每個品項的外幣成本、匯率、成本、售價與數量'); return; }
+  const duplicateName = duplicateProductName(items);
+  if (duplicateName) { renderToast(`同一賣場不能有相同商品名稱：「${duplicateName}」`); return; }
   const saveButton = document.querySelector('[data-action="save-market"]');
   state.busy = true;
   if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
@@ -1560,7 +1573,18 @@ function bind() {
   document.querySelector('[data-action="export"]')?.addEventListener('click', exportExcel);
   document.querySelector('[data-action="export-shipment"]')?.addEventListener('click', exportShipmentExcel);
   document.querySelectorAll('[data-shipment-snapshot]').forEach((button) => button.addEventListener('click', () => openStatementSnapshot(button.dataset.shipmentSnapshot, button)));
-  document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', () => { state.adminTab = button.dataset.adminTab; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
+  document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', async () => {
+    const nextTab = button.dataset.adminTab;
+    if (nextTab === 'summary') {
+      try {
+        await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks()]);
+        await loadProductCosts();
+      } catch (error) { renderToast(friendlyError(error)); }
+    }
+    state.adminTab = nextTab;
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
   document.querySelectorAll('[data-order-history]').forEach((button) => button.addEventListener('click', () => { state.adminOrderHistory = button.dataset.orderHistory === 'history'; render(); }));
   document.querySelectorAll('[data-procurement-history]').forEach((button) => button.addEventListener('click', () => { state.procurementHistory = button.dataset.procurementHistory === 'history'; render(); }));
   document.querySelectorAll('[data-procurement-product]').forEach((input) => input.addEventListener('change', () => toggleProcurement(input.dataset.procurementProduct, input.checked)));
@@ -1631,5 +1655,17 @@ document.addEventListener('keydown', (event) => {
   if (state.previewImage) { state.previewImage = null; render(); }
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) captureOpenDraft(); });
+let procurementPolling = false;
+window.setInterval(async () => {
+  if (procurementPolling || document.hidden || state.view !== 'admin' || state.adminTab !== 'summary' || state.modal) return;
+  procurementPolling = true;
+  const before = JSON.stringify([state.orders, state.markets, [...state.procurementChecks]]);
+  try {
+    await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks()]);
+    await loadProductCosts();
+    if (state.view === 'admin' && state.adminTab === 'summary' && before !== JSON.stringify([state.orders, state.markets, [...state.procurementChecks]])) render();
+  } catch (_) { /* The next poll or a tab switch will retry. */ }
+  finally { procurementPolling = false; }
+}, 30000);
 render();
 initialize();
