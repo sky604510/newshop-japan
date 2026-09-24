@@ -279,6 +279,7 @@ body.modal-open .pwa-install { display:none; }
 .shipment-table td:first-child small { display:block; color:var(--muted); margin-top:4px; }
 .shipment-recipient-check { display:flex; align-items:center; gap:8px; cursor:pointer; }
 .shipment-recipient-check input { width:18px; height:18px; margin:0; accent-color:var(--rose-deep); cursor:pointer; }
+.shipment-snapshot { display:block; margin-top:7px; padding:6px 12px; font-size:11px; }
 .shipment-bulk-actions { display:flex; justify-content:flex-end; margin:-4px 0 14px; }
 .shipment-uncomplete { margin-top:10px; white-space:nowrap; }
 .shipment-recipient-notes { display:grid; gap:8px; min-width:190px; margin-top:10px; }
@@ -356,6 +357,12 @@ body.modal-open .pwa-install { display:none; }
 .image-lightbox { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:clamp(18px,4vw,48px); background:rgba(27,17,23,.78); backdrop-filter:blur(8px); animation:fade-in .18s ease both; }
 .image-lightbox img { display:block; max-width:min(100%,1100px); max-height:calc(100dvh - 72px); object-fit:contain; border-radius:18px; background:white; box-shadow:0 28px 90px rgba(0,0,0,.38); animation:modal-up .25s cubic-bezier(.2,.8,.2,1) both; }
 .image-lightbox-close { position:fixed; top:18px; right:18px; z-index:1; }
+.statement-snapshot-backdrop { position:fixed; inset:0; z-index:90; display:grid; place-items:center; padding:16px; overflow:auto; background:rgba(27,17,23,.72); backdrop-filter:blur(6px); }
+.statement-snapshot-dialog { width:min(980px,100%); max-height:calc(100dvh - 32px); overflow:auto; padding:14px; border-radius:20px; background:white; box-shadow:0 28px 90px rgba(0,0,0,.3); }
+.statement-snapshot-actions,.statement-snapshot-actions > div { display:flex; align-items:center; gap:10px; }
+.statement-snapshot-actions { justify-content:space-between; margin-bottom:12px; }
+.statement-snapshot-warning { margin:0 0 12px; color:var(--rose-deep); font-size:12px; }
+.statement-snapshot-dialog > img { display:block; width:100%; height:auto; border:1px solid var(--line); }
 .order-item-admin input { width:86px; padding:6px 7px; border-radius:8px; }
 .order-item-admin button { padding:7px 9px; border-radius:8px; color:white; background:var(--ink); font-size:11px; font-weight:800; }
 .order-item-admin small { grid-column:1/-1; color:var(--rose-deep); }
@@ -469,6 +476,7 @@ body.modal-open .pwa-install { display:none; }
   .shipment-table { min-width:1050px; }
   .order-item-admin { min-width:430px; }
   .order-editor-modal { width:100%; max-height:calc(100dvh - 16px); padding:18px; }
+  .statement-snapshot-actions { align-items:flex-start; flex-direction:column; }
   .order-edit-row { grid-template-columns:1fr 1fr; gap:9px; }
   .order-edit-product { grid-column:1/-1; }
   .order-add-selects { grid-template-columns:1fr; }

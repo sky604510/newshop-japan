@@ -404,7 +404,7 @@ function adminView() {
   const shipments = shipmentSummaries(state.shipmentView);
   const shipmentRows = shipments.map((recipient) => {
     const selectedCount = recipient.items.filter((item) => state.shipmentSelection.has(item.id)).length;
-    return `<tr><td>${state.shipmentView === 'shipped' ? `<label class="shipment-recipient-check"><input data-complete-recipient="${esc(recipient.key)}" type="checkbox" aria-label="選取 ${esc(recipient.recipient)} 移至已完成" ${state.shipmentRecipientSelection.has(recipient.key) ? 'checked' : ''} ${state.shipmentCompletionReady ? '' : 'disabled'}/><strong>${esc(recipient.recipient)}</strong></label>` : `<strong>${esc(recipient.recipient)}</strong>`}<small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentView)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td><td>${state.shipmentView === 'pending' ? `<button class="btn btn-primary shipment-send" data-ship-recipient="${esc(recipient.key)}" ${selectedCount && state.fulfillmentReady ? '' : 'disabled'}>發貨${selectedCount ? `（${selectedCount}）` : ''}</button>` : state.shipmentView === 'shipped' ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<div class="shipment-date-controls">${shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label><span>${esc(item.name)}・${esc(item.shipped_at || '')}</span></label>`).join('')}</div>`).join('')}</div><button class="btn btn-light shipment-uncomplete" data-uncomplete-recipient="${esc(recipient.key)}" ${state.shipmentCompletionReady ? '' : 'disabled'}>還原至已發貨</button>`}</td></tr>`;
+    return `<tr><td>${state.shipmentView === 'shipped' ? `<label class="shipment-recipient-check"><input data-complete-recipient="${esc(recipient.key)}" type="checkbox" aria-label="選取 ${esc(recipient.recipient)} 移至已完成" ${state.shipmentRecipientSelection.has(recipient.key) ? 'checked' : ''} ${state.shipmentCompletionReady ? '' : 'disabled'}/><strong>${esc(recipient.recipient)}</strong></label><button class="btn btn-light shipment-snapshot" type="button" data-shipment-snapshot="${esc(recipient.key)}">快照</button>` : `<strong>${esc(recipient.recipient)}</strong>`}<small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentView)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td><td>${state.shipmentView === 'pending' ? `<button class="btn btn-primary shipment-send" data-ship-recipient="${esc(recipient.key)}" ${selectedCount && state.fulfillmentReady ? '' : 'disabled'}>發貨${selectedCount ? `（${selectedCount}）` : ''}</button>` : state.shipmentView === 'shipped' ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<div class="shipment-date-controls">${shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label><span>${esc(item.name)}・${esc(item.shipped_at || '')}</span></label>`).join('')}</div>`).join('')}</div><button class="btn btn-light shipment-uncomplete" data-uncomplete-recipient="${esc(recipient.key)}" ${state.shipmentCompletionReady ? '' : 'disabled'}>還原至已發貨</button>`}</td></tr>`;
   }).join('');
   const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}${state.fulfillmentReady && !state.shipmentCompletionReady ? `<div class="setup-notice">請執行 <strong>shipment_completion_upgrade.sql</strong>，才能使用已完成及還原功能；原有發貨歷史仍保留在已發貨。</div>` : ''}`;
@@ -547,6 +547,7 @@ function captureOpenDraft() {
 }
 
 function render() {
+  closeStatementSnapshot();
   const keepModalStable = Boolean(state.modal && document.querySelector('.modal-backdrop'));
   const suppressRerenderMotion = Boolean(document.querySelector('#app')?.children.length);
   const previousModalScroll = document.querySelector('.modal')?.scrollTop || 0;
@@ -1275,12 +1276,13 @@ function loadStyledShipmentXlsx() {
   return styledShipmentXlsxPromise;
 }
 
+const shipmentStatementHeaders = ['收件人', '訂購商品', '數量', '金額', '總金額', '訂單備註'];
 function shipmentPackingSheet(XLSX, recipients) {
   const rows = [];
   const merges = [];
   recipients.forEach((recipient, index) => {
     if (index) rows.push([]);
-    rows.push(['收件人', '訂購商品', '數量', '金額', '總金額', '訂單備註']);
+    rows.push(shipmentStatementHeaders);
     const recipientStart = rows.length;
     for (const group of shipmentOrderGroups(recipient)) {
       const orderStart = rows.length;
@@ -1297,7 +1299,7 @@ function shipmentPackingSheet(XLSX, recipients) {
       merges.push({ s: { r: recipientStart, c: 4 }, e: { r: rows.length - 1, c: 4 } });
     }
   });
-  const sheet = XLSX.utils.aoa_to_sheet(rows.length ? rows : [['收件人', '訂購商品', '數量', '金額', '總金額', '訂單備註']]);
+  const sheet = XLSX.utils.aoa_to_sheet(rows.length ? rows : [shipmentStatementHeaders]);
   sheet['!merges'] = merges;
   sheet['!cols'] = [{ wch: 20 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 38 }];
   const range = XLSX.utils.decode_range(sheet['!ref']);
@@ -1308,6 +1310,122 @@ function shipmentPackingSheet(XLSX, recipients) {
     }
   }
   return sheet;
+}
+
+function closeStatementSnapshot() {
+  const backdrop = document.querySelector('.statement-snapshot-backdrop');
+  if (!backdrop) return;
+  URL.revokeObjectURL(backdrop.dataset.imageUrl);
+  backdrop.remove();
+  document.body.classList.toggle('modal-open', Boolean(state.modal || state.previewImage));
+}
+
+function statementTextLines(ctx, value, width) {
+  const lines = [];
+  for (const paragraph of String(value || '').split('\n')) {
+    let line = '';
+    for (const char of paragraph) {
+      if (line && ctx.measureText(line + char).width > width) { lines.push(line); line = char; }
+      else line += char;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+async function statementSnapshotCanvas(recipient) {
+  const width = 920;
+  const columns = [0, 140, 450, 526, 642, 772, width];
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const groups = shipmentOrderGroups(recipient).map((group) => {
+    ctx.font = '15px sans-serif';
+    const noteLines = statementTextLines(ctx, group.note, columns[6] - columns[5] - 20);
+    const rows = group.items.map((item) => {
+      ctx.font = '16px sans-serif';
+      const nameLines = statementTextLines(ctx, item.name, columns[2] - columns[1] - 82);
+      return { item, nameLines, height: Math.max(72, nameLines.length * 22 + 22) };
+    });
+    const groupHeight = rows.reduce((sum, row) => sum + row.height, 0);
+    rows[0].height += Math.max(0, noteLines.length * 23 + 24 - groupHeight);
+    return { rows, noteLines };
+  });
+  const bodyHeight = groups.flatMap((group) => group.rows).reduce((sum, row) => sum + row.height, 0);
+  const tableTop = 76;
+  const headerHeight = 48;
+  const tableBottom = tableTop + headerHeight + bodyHeight;
+  canvas.width = width * 2;
+  canvas.height = (tableBottom + 30) * 2;
+  ctx.scale(2, 2);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, tableBottom + 30);
+  ctx.fillStyle = '#241a20'; ctx.font = 'bold 28px sans-serif'; ctx.fillText('對帳單', 22, 48);
+  ctx.fillStyle = '#fff0f5'; ctx.fillRect(0, tableTop, width, headerHeight);
+  ctx.strokeStyle = '#e5bfce'; ctx.lineWidth = 1;
+  const line = (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1 + .5, y1 + .5); ctx.lineTo(x2 + .5, y2 + .5); ctx.stroke(); };
+  const centered = (text, left, right, top, height, font = '16px sans-serif', color = '#241a20') => {
+    ctx.font = font; ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(text ?? ''), (left + right) / 2, top + height / 2, right - left - 14);
+  };
+  const centeredLines = (lines, left, right, top, height, font = '16px sans-serif') => {
+    ctx.font = font; ctx.fillStyle = '#241a20'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    lines.forEach((text, index) => ctx.fillText(text, (left + right) / 2, top + height / 2 + (index - (lines.length - 1) / 2) * 22));
+  };
+  shipmentStatementHeaders.forEach((header, index) => centered(header, columns[index], columns[index + 1], tableTop, headerHeight, 'bold 16px sans-serif'));
+  const imageUrls = [...new Set(recipient.items.map((item) => item.image_url).filter(Boolean))];
+  const images = new Map(await Promise.all(imageUrls.map((url) => new Promise((resolve) => {
+    const image = new Image();
+    const timeout = setTimeout(() => resolve([url, null]), 8000);
+    image.crossOrigin = 'anonymous';
+    image.onload = () => { clearTimeout(timeout); resolve([url, image]); };
+    image.onerror = () => { clearTimeout(timeout); resolve([url, null]); };
+    image.src = url;
+  }))));
+  let y = tableTop + headerHeight;
+  for (const group of groups) {
+    const groupTop = y;
+    for (const row of group.rows) {
+      const { item, height, nameLines } = row;
+      const image = images.get(item.image_url);
+      if (image) {
+        const scale = Math.min(48 / image.naturalWidth, 48 / image.naturalHeight);
+        const imageWidth = image.naturalWidth * scale; const imageHeight = image.naturalHeight * scale;
+        ctx.drawImage(image, columns[1] + 15 + (48 - imageWidth) / 2, y + (height - imageHeight) / 2, imageWidth, imageHeight);
+      }
+      centeredLines(nameLines, columns[1] + 68, columns[2] - 8, y, height);
+      centered(item.quantity, columns[2], columns[3], y, height);
+      centered(Number(item.amount).toLocaleString('zh-TW'), columns[3], columns[4], y, height);
+      y += height;
+      line(columns[1], y, columns[4], y);
+    }
+    centeredLines(group.noteLines, columns[5], columns[6], groupTop, y - groupTop, '15px sans-serif');
+    line(columns[5], y, columns[6], y);
+  }
+  centeredLines(statementTextLines(ctx, recipient.recipient, 120), columns[0], columns[1], tableTop + headerHeight, bodyHeight, 'bold 17px sans-serif');
+  centered(Number(recipient.amount).toLocaleString('zh-TW'), columns[4], columns[5], tableTop + headerHeight, bodyHeight, 'bold 18px sans-serif');
+  line(0, tableTop, width, tableTop); line(0, tableTop + headerHeight, width, tableTop + headerHeight);
+  line(0, tableBottom, width, tableBottom);
+  columns.forEach((x) => line(x, tableTop, x, tableBottom));
+  return { canvas, missingImages: imageUrls.filter((url) => !images.get(url)).length };
+}
+
+async function openStatementSnapshot(key, button) {
+  const recipient = shipmentSummaries('shipped').find((entry) => entry.key === key);
+  if (!recipient) { renderToast('找不到已發貨的收件人資料'); return; }
+  button.disabled = true; button.textContent = '產生中…';
+  try {
+    const { canvas, missingImages } = await statementSnapshotCanvas(recipient);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('無法產生圖片');
+    closeStatementSnapshot();
+    const url = URL.createObjectURL(blob);
+    const filename = `NewShop對帳單-${recipient.recipient.replace(/[\\/:*?"<>|]/g, '_')}-${dateValue(new Date())}.png`;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'statement-snapshot-backdrop'; backdrop.dataset.imageUrl = url;
+    backdrop.innerHTML = `<div class="statement-snapshot-dialog" role="dialog" aria-modal="true" aria-label="${esc(recipient.recipient)} 對帳單快照"><div class="statement-snapshot-actions"><strong>${esc(recipient.recipient)}・對帳單</strong><div><a class="btn btn-primary" href="${url}" download="${esc(filename)}">下載圖片</a><button class="btn btn-light" type="button" data-close-statement-snapshot>關閉</button></div></div>${missingImages ? `<p class="statement-snapshot-warning">${missingImages} 張商品圖片無法載入，已保留其他資料。</p>` : ''}<img src="${url}" alt="${esc(recipient.recipient)} 的對帳單" /></div>`;
+    backdrop.addEventListener('click', (event) => { if (event.target === backdrop || event.target.closest('[data-close-statement-snapshot]')) closeStatementSnapshot(); });
+    document.body.appendChild(backdrop); document.body.classList.add('modal-open');
+  } catch (error) { renderToast(`快照產生失敗：${friendlyError(error)}`); }
+  finally { button.disabled = false; button.textContent = '快照'; }
 }
 
 async function exportShipmentExcel() {
@@ -1322,7 +1440,7 @@ async function exportShipmentExcel() {
     sheet['!merges'] = shipmentRecipientMerges(recipients);
     sheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 16 }, { wch: 20 }, { wch: 18 }, { wch: 26 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, ...(view !== 'pending' ? [{ wch: 14 }] : [])];
     XLSX.utils.book_append_sheet(workbook, sheet, label);
-    if (view === 'shipped') XLSX.utils.book_append_sheet(workbook, shipmentPackingSheet(XLSX, recipients), '出貨清單');
+    if (view === 'shipped') XLSX.utils.book_append_sheet(workbook, shipmentPackingSheet(XLSX, recipients), '對帳單');
     XLSX.writeFile(workbook, `NewShop${label}-${new Date().toLocaleDateString('en-CA')}.xlsx`, { cellStyles: true });
   } catch (error) { renderToast(`Excel 產生失敗：${friendlyError(error)}`); }
 }
@@ -1409,6 +1527,7 @@ function bind() {
   document.querySelector('[data-action="continue-shopping"]')?.addEventListener('click', continueShopping);
   document.querySelector('[data-action="export"]')?.addEventListener('click', exportExcel);
   document.querySelector('[data-action="export-shipment"]')?.addEventListener('click', exportShipmentExcel);
+  document.querySelectorAll('[data-shipment-snapshot]').forEach((button) => button.addEventListener('click', () => openStatementSnapshot(button.dataset.shipmentSnapshot, button)));
   document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', () => { state.adminTab = button.dataset.adminTab; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
   document.querySelectorAll('[data-order-history]').forEach((button) => button.addEventListener('click', () => { state.adminOrderHistory = button.dataset.orderHistory === 'history'; render(); }));
   document.querySelectorAll('[data-procurement-history]').forEach((button) => button.addEventListener('click', () => { state.procurementHistory = button.dataset.procurementHistory === 'history'; render(); }));
@@ -1469,8 +1588,9 @@ function bind() {
 }
 
 document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape' || !state.previewImage) return;
-  state.previewImage = null; render();
+  if (event.key !== 'Escape') return;
+  if (document.querySelector('.statement-snapshot-backdrop')) { closeStatementSnapshot(); return; }
+  if (state.previewImage) { state.previewImage = null; render(); }
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) captureOpenDraft(); });
 render();
