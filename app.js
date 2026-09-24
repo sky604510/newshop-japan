@@ -1251,6 +1251,18 @@ function shipmentRecipientMerges(recipients) {
   });
 }
 
+let styledShipmentXlsxPromise = null;
+function loadStyledShipmentXlsx() {
+  if (!styledShipmentXlsxPromise) styledShipmentXlsxPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/assets/xlsx-style.bundle.js';
+    script.onload = () => window.XLSX?.utils ? resolve(window.XLSX) : reject(new Error('Excel 樣式套件載入失敗'));
+    script.onerror = () => { script.remove(); reject(new Error('Excel 樣式套件載入失敗')); };
+    document.head.appendChild(script);
+  }).catch((error) => { styledShipmentXlsxPromise = null; throw error; });
+  return styledShipmentXlsxPromise;
+}
+
 function shipmentPackingSheet(XLSX, recipients) {
   const rows = [];
   const merges = [];
@@ -1276,6 +1288,13 @@ function shipmentPackingSheet(XLSX, recipients) {
   const sheet = XLSX.utils.aoa_to_sheet(rows.length ? rows : [['收件人', '訂購商品', '數量', '金額', '總金額', '訂單備註']]);
   sheet['!merges'] = merges;
   sheet['!cols'] = [{ wch: 20 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 38 }];
+  const range = XLSX.utils.decode_range(sheet['!ref']);
+  for (let row = range.s.r; row <= range.e.r; row++) {
+    for (let col = 0; col < 6; col++) {
+      const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })];
+      if (cell) cell.s = { alignment: { horizontal: 'center', vertical: 'center' } };
+    }
+  }
   return sheet;
 }
 
@@ -1283,7 +1302,7 @@ async function exportShipmentExcel() {
   try {
     const view = state.shipmentView;
     const label = { pending: '待發貨清單', shipped: '已發貨清單', completed: '已完成清單' }[view];
-    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+    const XLSX = view === 'shipped' ? await loadStyledShipmentXlsx() : await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
     const workbook = XLSX.utils.book_new();
     const recipients = shipmentSummaries(view);
     const rows = shipmentExportRows(view !== 'pending', recipients);
