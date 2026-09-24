@@ -292,7 +292,7 @@ function marketSummaries(includeZero = false) {
       const quantity = itemOrders.reduce((sum, item) => sum + Number(item.quantity), 0); const currentCost = Number(product.cost || 0);
       const revenue = itemOrders.reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
       const totalCost = itemOrders.reduce((sum, item) => sum + currentOrderItemCost(item) * Number(item.quantity), 0);
-      const cost = quantity ? totalCost / quantity : currentCost; const price = quantity ? revenue / quantity : Number(product.price || 0);
+      const cost = Math.round(quantity ? totalCost / quantity : currentCost); const price = quantity ? revenue / quantity : Number(product.price || 0);
       return { product, quantity, cost, price, revenue, totalCost, profit: revenue - totalCost, buyers: new Set(itemOrders.map((item) => item.order.customer_id || item.order.phone)).size, procured: Boolean(state.procurementChecks.get(product.id)?.is_purchased) };
     }).filter((row) => includeZero || row.quantity > 0),
   })).filter((entry) => includeZero || entry.rows.length);
@@ -1438,7 +1438,8 @@ async function openStatementSnapshot(key, button) {
     const backdrop = document.createElement('div');
     backdrop.className = 'statement-snapshot-backdrop'; backdrop.dataset.imageUrl = url;
     backdrop.innerHTML = `<div class="statement-snapshot-dialog" role="dialog" aria-modal="true" aria-label="${esc(recipient.recipient)} 對帳單快照"><div class="statement-snapshot-actions"><strong>${esc(recipient.recipient)}・對帳單</strong><div><a class="btn btn-primary" href="${url}" download="${esc(filename)}">下載圖片</a><button class="btn btn-light" type="button" data-close-statement-snapshot>關閉</button></div></div>${missingImages ? `<p class="statement-snapshot-warning">${missingImages} 張商品圖片無法載入，已保留其他資料。</p>` : ''}<img src="${url}" alt="${esc(recipient.recipient)} 的對帳單" /></div>`;
-    backdrop.addEventListener('click', (event) => { if (event.target === backdrop || event.target.closest('[data-close-statement-snapshot]')) closeStatementSnapshot(); });
+    bindBackdropClose(backdrop, closeStatementSnapshot);
+    backdrop.querySelector('[data-close-statement-snapshot]')?.addEventListener('click', closeStatementSnapshot);
     document.body.appendChild(backdrop); document.body.classList.add('modal-open');
   } catch (error) { renderToast(`快照產生失敗：${friendlyError(error)}`); }
   finally { button.disabled = false; button.textContent = '快照'; }
@@ -1510,15 +1511,25 @@ async function saveOrderDelivery() {
   finally { if (button) button.disabled = false; if (saveButton) saveButton.disabled = false; }
 }
 
+function bindBackdropClose(backdrop, close) {
+  if (!backdrop) return;
+  let pressedOutside = false;
+  let releasedOutside = false;
+  backdrop.addEventListener('pointerdown', (event) => { pressedOutside = event.target === backdrop; releasedOutside = false; });
+  backdrop.addEventListener('pointerup', (event) => { releasedOutside = event.target === backdrop; });
+  backdrop.addEventListener('pointercancel', () => { pressedOutside = false; releasedOutside = false; });
+  backdrop.addEventListener('click', (event) => {
+    if (event.target === backdrop && pressedOutside && releasedOutside) close();
+    pressedOutside = false; releasedOutside = false;
+  });
+}
+
 function bind() {
   document.querySelector('[data-save-order-delivery]')?.addEventListener('click', saveOrderDelivery);
   document.querySelector('#order-delivery')?.addEventListener('change', syncOrderDraftFromForm);
   bindModalScroll();
   document.querySelectorAll('[data-batch-item]').forEach((button) => button.addEventListener('click', () => changeBatchQuantity(button.dataset.batchItem, Number(button.dataset.batchDelta))));
-  document.querySelector('.modal-backdrop')?.addEventListener('click', (event) => {
-    if (event.target !== event.currentTarget) return;
-    closeActiveModal();
-  });
+  bindBackdropClose(document.querySelector('.modal-backdrop'), closeActiveModal);
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => { state.view = button.dataset.view; if (state.view === 'admin') state.adminTab = 'markets'; if ((state.view === 'orders' || state.view === 'admin') && state.user) { await Promise.all([loadOrders(), loadMarkets(), loadCustomers(), loadProcurementChecks(), loadFulfillmentChecks()]); await loadProductCosts(); } render(); }));
   document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => { const target = button.dataset.scroll; if (state.view !== 'shop') { state.view = 'shop'; render(); requestAnimationFrame(() => document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' })); } else document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' }); }));
   document.querySelectorAll('[data-open-market]').forEach((button) => button.addEventListener('click', () => openMarket(button.dataset.openMarket)));
@@ -1608,10 +1619,10 @@ function bind() {
     if (!button.dataset.previewImage) return;
     state.previewImage = button.dataset.previewImage; render();
   }));
-  document.querySelectorAll('[data-action="close-image-preview"]').forEach((element) => element.addEventListener('click', (event) => {
-    if (element.classList.contains('image-lightbox') && event.target !== element) return;
-    state.previewImage = null; render();
-  }));
+  const lightbox = document.querySelector('.image-lightbox');
+  const closePreview = () => { state.previewImage = null; render(); };
+  bindBackdropClose(lightbox, closePreview);
+  lightbox?.querySelector('.image-lightbox-close')?.addEventListener('click', closePreview);
 }
 
 document.addEventListener('keydown', (event) => {
