@@ -19,7 +19,7 @@ const state = {
   authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, shipmentView: 'pending',
   procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), shipmentRecipientSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true,
   operationsReady: true, costReady: true, pricingReady: true, adminOpsReady: true, orderEditorReady: true, sortingReady: true,
-  fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true,
+  fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, orderCostOverrideReady: true,
 };
 
 const money = (value) => `NT$ ${Number(value || 0).toLocaleString('zh-TW')}`;
@@ -164,14 +164,20 @@ async function loadProfile() {
 async function loadOrders() {
   if (!state.user) { state.orders = []; return; }
   let result = await supabase.from('orders')
-    .select('id,order_number,user_id,account_email,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)')
+    .select('id,order_number,user_id,account_email,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_cost_overridden,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)')
     .order('created_at', { ascending: false });
   if (result.error && /account_email/i.test(result.error.message || '')) {
     state.adminOpsReady = false;
     result = await supabase.from('orders')
-      .select('id,order_number,user_id,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)')
+      .select('id,order_number,user_id,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_cost_overridden,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)')
       .order('created_at', { ascending: false });
   }
+  if (result.error && /unit_cost_overridden/i.test(result.error.message || '')) {
+    state.orderCostOverrideReady = false;
+    result = await supabase.from('orders')
+      .select(`id,order_number,user_id,${state.adminOpsReady ? 'account_email,' : ''}customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)`)
+      .order('created_at', { ascending: false });
+  } else if (!result.error) state.orderCostOverrideReady = true;
   if (result.error && /unit_cost|original_unit_price|price_adjusted_at/i.test(result.error.message || '')) {
     if (/unit_cost/i.test(result.error.message || '')) state.costReady = false;
     if (/original_unit_price|price_adjusted_at/i.test(result.error.message || '')) state.pricingReady = false;
@@ -273,7 +279,7 @@ function ordersView() {
 
 function currentOrderItemCost(item) {
   const product = state.products.find((entry) => entry.id === item.product_id);
-  return Number(product ? product.cost : item.unit_cost ?? 0);
+  return Number(item.unit_cost ?? product?.cost ?? 0);
 }
 
 function marketSummaries(includeZero = false) {
@@ -365,6 +371,7 @@ function createOrderDraft(order) {
     items: (order.order_items || []).map((item) => ({
       key: item.id, id: item.id, product_id: item.product_id || '', market_id: item.market_id || '',
       product_name: item.product_name, quantity: Number(item.quantity), unit_price: Number(item.unit_price),
+      unit_cost: Math.round(currentOrderItemCost(item)), base_unit_cost: Math.round(currentOrderItemCost(item)),
       original_unit_price: item.original_unit_price,
     })),
   };
@@ -384,9 +391,9 @@ function orderEditorModal() {
       return `<option value="${entry.id}" ${entry.id === item.product_id ? 'selected' : ''} ${unavailable ? 'disabled' : ''}>${esc(label)}</option>`;
     }).join('');
     const image = product?.image_url;
-    return `<div class="order-edit-row ${item.id ? '' : 'is-new'}" data-order-draft-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><div class="order-edit-product"><button class="order-item-thumb image-preview-trigger" data-preview-image="${esc(image || '')}" aria-label="${image ? `放大查看 ${esc(product?.name || item.product_name)}` : '沒有商品圖片'}" ${image ? '' : 'disabled'}>${image ? `<img src="${esc(image)}" alt=""/>` : ''}</button>${item.id ? `<div><strong>${esc(item.product_name)}</strong><small>${esc(market?.name || '未分類賣場')}</small></div>` : `<div class="order-add-selects"><label>賣場<select data-order-draft-market><option value="">選擇賣場</option>${marketOptions}</select></label><label>商品<select data-order-draft-product ${item.market_id ? '' : 'disabled'}><option value="">選擇商品</option>${productOptions}</select></label></div>`}</div><label class="order-edit-number">數量<input data-order-draft-quantity type="number" min="0" step="1" value="${item.quantity}"/></label><label class="order-edit-number">單價<input data-order-draft-price type="number" min="0" step="1" value="${item.unit_price}"/></label><button class="order-edit-remove" data-remove-order-draft-item="${esc(item.key)}" type="button">${item.id ? '設為 0' : '移除'}</button>${item.original_unit_price != null ? `<small class="adjusted-note">原始單價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
+    return `<div class="order-edit-row ${item.id ? '' : 'is-new'}" data-order-draft-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><div class="order-edit-product"><button class="order-item-thumb image-preview-trigger" data-preview-image="${esc(image || '')}" aria-label="${image ? `放大查看 ${esc(product?.name || item.product_name)}` : '沒有商品圖片'}" ${image ? '' : 'disabled'}>${image ? `<img src="${esc(image)}" alt=""/>` : ''}</button>${item.id ? `<div><strong>${esc(item.product_name)}</strong><small>${esc(market?.name || '未分類賣場')}</small></div>` : `<div class="order-add-selects"><label>賣場<select data-order-draft-market><option value="">選擇賣場</option>${marketOptions}</select></label><label>商品<select data-order-draft-product ${item.market_id ? '' : 'disabled'}><option value="">選擇商品</option>${productOptions}</select></label></div>`}</div><label class="order-edit-number">數量<input data-order-draft-quantity type="number" min="0" step="1" value="${item.quantity}"/></label><label class="order-edit-number">成本<input data-order-draft-cost type="number" min="0" step="1" value="${item.unit_cost}" ${state.orderCostOverrideReady ? '' : 'disabled'}/></label><label class="order-edit-number">單價<input data-order-draft-price type="number" min="0" step="0.01" value="${item.unit_price}"/></label><button class="order-edit-remove" data-remove-order-draft-item="${esc(item.key)}" type="button">${item.id ? '設為 0' : '移除'}</button>${item.original_unit_price != null ? `<small class="adjusted-note">原始單價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
   }).join('');
-  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select><button class="btn btn-light" data-save-order-delivery>儲存取貨方式</button></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；無庫存商品會呈灰色且無法選擇。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select><button class="btn btn-light" type="button" data-save-order-delivery>儲存取貨方式</button></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；手動修改成本後，商品清單的成本變動不會覆蓋此訂單。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
 }
 
 function adminView() {
@@ -394,7 +401,7 @@ function adminView() {
   const total = state.orders.filter((order) => order.status !== 'cancelled').reduce((sum, order) => sum + Number(order.total_amount), 0);
   const statusOptions = (current) => Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`).join('');
   const viewingOrders = state.orders.filter((order) => state.adminOrderHistory ? ['completed', 'cancelled'].includes(order.status) : !['completed', 'cancelled'].includes(order.status));
-  const orderRows = viewingOrders.map((order) => `<tr><td>${esc(order.order_number)}<small class="account-email">${esc(order.account_email || '帳號未記錄')}</small>${order.note?.trim() ? `<div class="order-note"><strong>訂單備註</strong><span>${esc(order.note.trim())}</span></div>` : ''}</td><td>${esc(order.recipient_name)}<br/><small>${order.phone ? `${esc(order.phone)}・` : ''}${esc(order.delivery_method)}</small></td><td><div class="order-item-summaries">${(order.order_items || []).map((item) => orderItemSummary(item, true)).join('') || '<small>尚無商品</small>'}</div></td><td>${money(order.total_amount)}</td><td><select data-order-status="${order.id}">${statusOptions(order.status)}</select></td><td><div class="admin-actions"><button class="btn btn-light" data-edit-order="${order.id}">編輯</button><button class="btn btn-danger-soft" data-delete-order="${order.id}" ${state.adminOpsReady ? '' : 'disabled'}>刪除</button></div></td></tr>`).join('');
+  const orderRows = viewingOrders.map((order) => `<tr><td>${esc(order.order_number)}<small class="account-email">${esc(order.account_email || '帳號未記錄')}</small>${order.note?.trim() ? `<div class="order-note"><strong>訂單備註</strong><span>${esc(order.note.trim())}</span></div>` : ''}</td><td>${esc(order.recipient_name)}<br/><small data-order-delivery-label="${order.id}">${order.phone ? `${esc(order.phone)}・` : ''}${esc(order.delivery_method)}</small></td><td><div class="order-item-summaries">${(order.order_items || []).map((item) => orderItemSummary(item, true)).join('') || '<small>尚無商品</small>'}</div></td><td>${money(order.total_amount)}</td><td><select data-order-status="${order.id}">${statusOptions(order.status)}</select></td><td><div class="admin-actions"><button class="btn btn-light" data-edit-order="${order.id}">編輯</button><button class="btn btn-danger-soft" data-delete-order="${order.id}" ${state.adminOpsReady ? '' : 'disabled'}>刪除</button></div></td></tr>`).join('');
   const marketRows = state.markets.map((market) => { const cover = market.image_url; return `<tr class="sortable-market ${market.is_pinned ? 'is-pinned' : ''}" data-market-sort="${market.id}" data-sort-group="${market.is_pinned ? 'pinned' : 'normal'}"><td><button class="drag-handle" data-market-drag aria-label="拖曳調整 ${esc(market.name)} 排序" title="拖曳排序" ${state.sortingReady ? '' : 'disabled'}>⋮⋮</button></td><td><div class="admin-market"><span class="admin-thumb">${cover ? `<img src="${esc(cover)}" alt=""/>` : ''}</span><span><strong>${esc(market.name)}</strong><small>${market.is_pinned ? '已置頂・' : ''}${market.is_active ? '已上架' : '已下架'}・${market.closes_at ? `收單 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}` : '未設定期限'}</small></span></div></td><td>${market.products.length}</td><td>${market.products.reduce((sum, item) => sum + Number(item.stock), 0)}</td><td><div class="admin-actions"><button class="btn ${market.is_pinned ? 'btn-accent' : 'btn-light'}" data-pin-market="${market.id}" ${state.sortingReady ? '' : 'disabled'}>${market.is_pinned ? '取消置頂' : '置頂'}</button><button class="btn btn-light" data-edit-market="${market.id}">編輯</button><button class="btn ${market.is_active ? 'btn-danger-soft' : 'btn-accent'}" data-toggle-market="${market.id}">${market.is_active ? '下架' : '上架'}</button><button class="btn btn-danger-soft" data-delete-market="${market.id}">刪除</button></div></td></tr>`; }).join('');
   const customerRows = state.customers.map((customer) => { const latest = latestCustomerOrder(customer); const latestItem = latest ? (latest.order_items || []).map((item) => item.product_name).join('、') : '尚未下單'; return `<tr data-customer-row="${customer.id}"><td><input data-customer-name value="${esc(customer.recipient_name)}"/></td><td><input data-customer-email type="email" value="${esc(customer.email || '')}" placeholder="選填"/></td><td><input data-customer-phone value="${esc(customer.phone || '')}" placeholder="選填"/></td><td><select data-customer-delivery>${deliverySelect(customer.delivery_method)}</select></td><td>${esc(latestItem)}${latest ? `<small>${new Date(latest.created_at).toLocaleDateString('zh-TW')}</small>` : ''}</td><td class="customer-flag"><input data-customer-regular type="checkbox" aria-label="常客" ${customer.is_regular ? 'checked' : ''}/></td><td class="customer-flag vip"><input data-customer-vip type="checkbox" aria-label="VIP" ${customer.is_vip ? 'checked' : ''}/></td><td><input data-customer-note value="${esc(customer.admin_note)}" placeholder="內部備註"/></td><td><div class="admin-actions"><button class="btn btn-light" data-save-customer="${customer.id}">儲存</button><button class="btn btn-danger-soft" data-delete-customer="${customer.id}">刪除</button></div></td></tr>`; }).join('');
   const summaries = marketSummaries().map((entry) => ({ ...entry, rows: entry.rows.filter((row) => row.procured === state.procurementHistory) })).filter((entry) => entry.rows.length);
@@ -408,13 +415,14 @@ function adminView() {
   }).join('');
   const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}${state.fulfillmentReady && !state.shipmentCompletionReady ? `<div class="setup-notice">請執行 <strong>shipment_completion_upgrade.sql</strong>，才能使用已完成及還原功能；原有發貨歷史仍保留在已發貨。</div>` : ''}`;
+  const orderCostNotice = state.orderCostOverrideReady ? '' : '<div class="setup-notice">請執行 <strong>order_cost_override_upgrade.sql</strong>，才能保存訂單品項的手動成本。</div>';
   const orderPanel = `<section class="panel order-panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史清單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整訂單 →</div><div class="table-wrap order-table-wrap"><table class="admin-table order-management-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
   const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div><div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div></section>`;
   const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><button class="btn btn-primary" data-action="export-shipment">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${state.shipmentView === 'pending' ? 'active' : ''}" data-shipment-view="pending">待發貨</button><button class="${state.shipmentView === 'shipped' ? 'active' : ''}" data-shipment-view="shipped">已發貨</button><button class="${state.shipmentView === 'completed' ? 'active' : ''}" data-shipment-view="completed" ${state.shipmentCompletionReady ? '' : 'disabled'}>已完成</button></div>${state.shipmentView === 'shipped' ? `<div class="shipment-bulk-actions"><button class="btn btn-primary" data-complete-selected ${state.shipmentRecipientSelection.size && state.shipmentCompletionReady ? '' : 'disabled'}>將選取的收件人移至已完成${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}</button></div>` : ''}${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th><th>${state.shipmentView === 'pending' ? '操作' : state.shipmentView === 'shipped' ? '發貨日期' : '發貨日期／操作'}</th></tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentView === 'pending' ? '目前沒有待發貨商品' : state.shipmentView === 'shipped' ? '目前沒有已發貨商品' : '目前沒有已完成商品'}</div>`}</section>`;
   const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>只有收件人為必填，信箱與電話皆可留空。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>信箱（選填）</th><th>電話（選填）</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
   const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>拖曳調整同一區內的順序；可同時置頂多個賣場。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table market-sort-table"><thead><tr><th>排序</th><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody id="market-sort-list">${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
   const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, customers: customerPanel, markets: marketPanel };
-  return `<main class="admin-page">${migrationNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
+  return `<main class="admin-page">${migrationNotice}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
 }
 
 function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
@@ -1005,6 +1013,7 @@ function syncOrderDraftFromForm() {
       market_id: row.querySelector('[data-order-draft-market]')?.value ?? old.market_id ?? '',
       product_id: row.querySelector('[data-order-draft-product]')?.value ?? old.product_id ?? '',
       quantity: row.querySelector('[data-order-draft-quantity]')?.value ?? old.quantity ?? 0,
+      unit_cost: row.querySelector('[data-order-draft-cost]')?.value ?? old.unit_cost ?? 0,
       unit_price: row.querySelector('[data-order-draft-price]')?.value ?? old.unit_price ?? 0,
     };
   });
@@ -1037,7 +1046,7 @@ function closeActiveModal() {
 
 function addOrderDraftItem() {
   syncOrderDraftFromForm();
-  state.orderDraft.items.push({ key: crypto.randomUUID(), id: null, market_id: '', product_id: '', product_name: '', quantity: 1, unit_price: 0, original_unit_price: null });
+  state.orderDraft.items.push({ key: crypto.randomUUID(), id: null, market_id: '', product_id: '', product_name: '', quantity: 1, unit_cost: 0, base_unit_cost: 0, cost_edited: false, unit_price: 0, original_unit_price: null });
   render();
   requestAnimationFrame(() => document.querySelector('.order-edit-row:last-child')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
 }
@@ -1045,14 +1054,14 @@ function addOrderDraftItem() {
 function changeOrderDraftMarket(key, marketId) {
   syncOrderDraftFromForm();
   const item = state.orderDraft.items.find((entry) => entry.key === key); if (!item) return;
-  item.market_id = marketId; item.product_id = ''; item.product_name = ''; item.unit_price = 0; render();
+  item.market_id = marketId; item.product_id = ''; item.product_name = ''; item.unit_cost = 0; item.base_unit_cost = 0; item.cost_edited = false; item.unit_price = 0; render();
 }
 
 function changeOrderDraftProduct(key, productId) {
   syncOrderDraftFromForm();
   const item = state.orderDraft.items.find((entry) => entry.key === key); const product = state.products.find((entry) => entry.id === productId);
   if (!item || !product || Number(product.stock) <= 0) return;
-  item.market_id = product.market_id; item.product_id = product.id; item.product_name = product.name; item.unit_price = Number(product.price); render();
+  item.market_id = product.market_id; item.product_id = product.id; item.product_name = product.name; item.unit_cost = Math.round(Number(product.cost || 0)); item.base_unit_cost = item.unit_cost; item.cost_edited = false; item.unit_price = Number(product.price); render();
 }
 
 function removeOrderDraftItem(key) {
@@ -1064,23 +1073,30 @@ function removeOrderDraftItem(key) {
 }
 
 async function saveOrderEditor() {
-  if (!isManager() || !state.orderDraft) return;
+  if (!isManager() || !state.orderDraft || state.busy) return;
   syncOrderDraftFromForm();
+  if (!state.orderCostOverrideReady) { renderToast('請先在 Supabase 執行 order_cost_override_upgrade.sql'); return; }
   const items = state.orderDraft.items;
-  const invalid = items.some((item) => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 0 || !Number.isFinite(Number(item.unit_price)) || Number(item.unit_price) < 0 || (!item.id && Number(item.quantity) > 0 && !item.product_id));
-  if (invalid) { renderToast('請確認商品、數量與單價都已正確填寫'); return; }
+  const invalid = items.some((item) => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 0 || item.unit_cost === '' || !Number.isInteger(Number(item.unit_cost)) || Number(item.unit_cost) < 0 || !Number.isFinite(Number(item.unit_price)) || Number(item.unit_price) < 0 || (!item.id && Number(item.quantity) > 0 && !item.product_id));
+  if (invalid || !deliveryOptions.includes(state.orderDraft.delivery_method)) { renderToast('請確認取貨方式、商品、數量、整數成本與單價'); return; }
   if (!items.some((item) => Number(item.quantity) > 0)) { renderToast('訂單至少需要保留一個商品'); return; }
-  state.busy = true; render();
-  const payload = items.map((item) => ({ id: item.id || null, product_id: item.product_id || null, quantity: Number(item.quantity), unit_price: Number(item.unit_price) }));
-  const { error } = await supabase.rpc('admin_save_order_items', { p_order_id: state.orderDraft.orderId, p_items: payload });
-  state.busy = false;
-  if (error) {
-    if (/admin_save_order_items|schema cache|could not find/i.test(error.message || '')) state.orderEditorReady = false;
-    render(); renderToast(state.orderEditorReady ? friendlyError(error) : '請先在 Supabase 執行 order_editor_upgrade.sql'); return;
+  state.busy = true;
+  const button = document.querySelector('[data-action="save-order-editor"]');
+  if (button) { button.disabled = true; button.textContent = '儲存中…'; }
+  const payload = items.map((item) => ({ id: item.id || null, product_id: item.product_id || null, quantity: Number(item.quantity), unit_price: Number(item.unit_price), ...(item.cost_edited || Number(item.unit_cost) !== Number(item.base_unit_cost) ? { unit_cost: Number(item.unit_cost) } : {}) }));
+  try {
+    const { error } = await supabase.rpc('admin_save_order_items', { p_order_id: state.orderDraft.orderId, p_items: payload, p_delivery_method: state.orderDraft.delivery_method });
+    if (error) throw error;
+    state.orderEditorReady = true; state.orderCostOverrideReady = true;
+    await Promise.all([loadOrders(), loadMarkets()]); await loadProductCosts();
+    state.modal = null; state.editingOrderId = null; state.orderDraft = null; render(); renderToast('訂單與取貨方式已更新');
+  } catch (error) {
+    if (/admin_save_order_items|schema cache|could not find/i.test(error.message || '')) state.orderCostOverrideReady = false;
+    renderToast(state.orderCostOverrideReady ? friendlyError(error) : '請先在 Supabase 執行 order_cost_override_upgrade.sql');
+  } finally {
+    state.busy = false;
+    if (button?.isConnected) { button.disabled = false; button.textContent = '儲存訂單'; }
   }
-  state.orderEditorReady = true;
-  await Promise.all([loadOrders(), loadMarkets()]); await loadProductCosts();
-  state.modal = null; state.editingOrderId = null; state.orderDraft = null; render(); renderToast('訂單商品已更新');
 }
 
 async function updateOrderItemPrice(id) {
@@ -1473,20 +1489,25 @@ async function exportExcel() {
 }
 
 async function saveOrderDelivery() {
-  if (!isManager() || !state.orderDraft) return;
+  if (!isManager() || !state.orderDraft || state.busy) return;
   syncOrderDraftFromForm();
   const delivery = state.orderDraft.delivery_method;
   if (!deliveryOptions.includes(delivery)) return;
   const button = document.querySelector('[data-save-order-delivery]');
+  const saveButton = document.querySelector('[data-action="save-order-editor"]');
   if (button) button.disabled = true;
+  if (saveButton) saveButton.disabled = true;
   try {
     const { data, error } = await supabase.from('orders').update({ delivery_method: delivery }).eq('id', state.orderDraft.orderId).select('id,delivery_method').single();
     if (error) throw error;
+    await loadOrders();
     const order = state.orders.find((entry) => entry.id === data.id);
-    if (order) order.delivery_method = data.delivery_method;
+    if (!order || order.delivery_method !== delivery) throw new Error('取貨方式未寫入，請重試');
+    const label = document.querySelector(`[data-order-delivery-label="${data.id}"]`);
+    if (label) label.textContent = `${order.phone ? `${order.phone}・` : ''}${order.delivery_method}`;
     renderToast('取貨方式已儲存');
   } catch (error) { renderToast(friendlyError(error)); }
-  finally { if (button) button.disabled = false; }
+  finally { if (button) button.disabled = false; if (saveButton) saveButton.disabled = false; }
 }
 
 function bind() {
@@ -1575,6 +1596,12 @@ function bind() {
   document.querySelectorAll('[data-order-draft-market]').forEach((select) => select.addEventListener('change', () => changeOrderDraftMarket(select.closest('[data-order-draft-row]').dataset.key, select.value)));
   document.querySelectorAll('[data-order-draft-product]').forEach((select) => select.addEventListener('change', () => changeOrderDraftProduct(select.closest('[data-order-draft-row]').dataset.key, select.value)));
   document.querySelectorAll('[data-order-draft-quantity],[data-order-draft-price]').forEach((input) => input.addEventListener('input', updateOrderDraftTotal));
+  document.querySelectorAll('[data-order-draft-cost]').forEach((input) => input.addEventListener('input', () => {
+    const key = input.closest('[data-order-draft-row]')?.dataset.key;
+    const item = state.orderDraft?.items.find((entry) => entry.key === key);
+    if (item) item.cost_edited = true;
+    syncOrderDraftFromForm();
+  }));
   document.querySelectorAll('[data-remove-order-draft-item]').forEach((button) => button.addEventListener('click', () => removeOrderDraftItem(button.dataset.removeOrderDraftItem)));
   document.querySelectorAll('[data-delete-order]').forEach((button) => button.addEventListener('click', () => deleteOrder(button.dataset.deleteOrder)));
   document.querySelectorAll('[data-preview-image]').forEach((button) => button.addEventListener('click', () => {
