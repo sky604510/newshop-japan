@@ -1254,11 +1254,23 @@ function shipmentRecipientMerges(recipients) {
 let styledShipmentXlsxPromise = null;
 function loadStyledShipmentXlsx() {
   if (!styledShipmentXlsxPromise) styledShipmentXlsxPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = '/assets/xlsx-style.bundle.js';
-    script.onload = () => window.XLSX?.utils ? resolve(window.XLSX) : reject(new Error('Excel 樣式套件載入失敗'));
-    script.onerror = () => { script.remove(); reject(new Error('Excel 樣式套件載入失敗')); };
-    document.head.appendChild(script);
+    const sources = [
+      '/assets/xlsx-style.bundle.js',
+      'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js',
+    ];
+    const loadNext = () => {
+      const src = sources.shift();
+      if (!src) { reject(new Error('Excel 樣式套件載入失敗')); return; }
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = () => {
+        if (window.XLSX?.utils && window.XLSX?.writeFile) resolve(window.XLSX);
+        else { script.remove(); loadNext(); }
+      };
+      script.onerror = () => { script.remove(); loadNext(); };
+      document.head.appendChild(script);
+    };
+    loadNext();
   }).catch((error) => { styledShipmentXlsxPromise = null; throw error; });
   return styledShipmentXlsxPromise;
 }
