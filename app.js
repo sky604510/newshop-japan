@@ -324,16 +324,43 @@ function latestCustomerOrder(customer) {
 }
 
 function shipmentSummaries(view = 'pending') {
-  const recipients = new Map();
+  const recipients = [];
+  const customers = new Map(state.customers.map((customer) => [customer.id, customer]));
   for (const order of state.orders.filter((entry) => entry.status !== 'cancelled')) {
-    const key = `${String(order.recipient_name).trim().toLowerCase()}|${String(order.phone).trim()}`;
-    for (const item of order.order_items || []) {
+    const orderItems = (order.order_items || []).filter((item) => {
       const fulfillment = state.fulfillmentChecks.get(item.id);
       const stage = !fulfillment?.shipped_at ? 'pending' : fulfillment.completed_at ? 'completed' : 'shipped';
-      if (stage !== view) continue;
-      if (!recipients.has(key)) recipients.set(key, { key, recipient: order.recipient_name, phone: order.phone, delivery: order.delivery_method, accounts: new Set(), items: [], amount: 0, profit: 0 });
-      const recipient = recipients.get(key);
-      if (order.account_email) recipient.accounts.add(order.account_email);
+      return stage === view;
+    });
+    if (!orderItems.length) continue;
+    const name = String(order.recipient_name).trim().toLowerCase();
+    const phone = String(order.phone || '').replace(/\D/g, '');
+    const email = String(customers.get(order.customer_id)?.email || '').trim().toLowerCase();
+    const matches = recipients.filter((entry) => entry.name === name && (
+      (phone && entry.phones.has(phone)) || (email && entry.emails.has(email)) || (order.customer_id && entry.customerIds.has(order.customer_id))
+    ));
+    const recipient = matches[0] || { key: order.id, name, recipient: order.recipient_name, phones: new Set(), emails: new Set(), customerIds: new Set(), phoneLabels: new Set(), deliveries: new Set(), accounts: new Set(), items: [], amount: 0, profit: 0 };
+    if (!matches.length) recipients.push(recipient);
+    for (const duplicate of matches.slice(1)) {
+      duplicate.phones.forEach((value) => recipient.phones.add(value));
+      duplicate.emails.forEach((value) => recipient.emails.add(value));
+      duplicate.customerIds.forEach((value) => recipient.customerIds.add(value));
+      duplicate.phoneLabels.forEach((value) => recipient.phoneLabels.add(value));
+      duplicate.deliveries.forEach((value) => recipient.deliveries.add(value));
+      duplicate.accounts.forEach((value) => recipient.accounts.add(value));
+      recipient.items.push(...duplicate.items);
+      recipient.amount += duplicate.amount;
+      recipient.profit += duplicate.profit;
+      recipients.splice(recipients.indexOf(duplicate), 1);
+    }
+    if (phone) recipient.phones.add(phone);
+    if (email) recipient.emails.add(email);
+    if (order.customer_id) recipient.customerIds.add(order.customer_id);
+    if (order.phone?.trim()) recipient.phoneLabels.add(order.phone.trim());
+    recipient.deliveries.add(order.delivery_method);
+    if (order.account_email) recipient.accounts.add(order.account_email);
+    for (const item of orderItems) {
+      const fulfillment = state.fulfillmentChecks.get(item.id);
       const product = state.products.find((entry) => entry.id === item.product_id);
       const unitCost = currentOrderItemCost(item); const quantity = Number(item.quantity); const amount = Number(item.unit_price) * quantity; const profit = amount - unitCost * quantity;
       const imageUrl = product?.image_url || '';
@@ -341,7 +368,7 @@ function shipmentSummaries(view = 'pending') {
       recipient.amount += amount; recipient.profit += profit;
     }
   }
-  return [...recipients.values()].map((recipient) => ({ ...recipient, account: [...recipient.accounts].join('、') || '未記錄' }));
+  return recipients.map((recipient) => ({ ...recipient, phone: [...recipient.phoneLabels].join('、'), delivery: [...recipient.deliveries].join('、'), account: [...recipient.accounts].join('、') || '未記錄' }));
 }
 
 function shipmentOrderGroups(recipient) {
@@ -378,6 +405,7 @@ function orderItemSummary(item, showPurchaseCheck = false) {
 function createOrderDraft(order) {
   return {
     orderId: order.id,
+    phone: order.phone || '',
     delivery_method: order.delivery_method,
     items: (order.order_items || []).map((item) => ({
       key: item.id, id: item.id, product_id: item.product_id || '', market_id: item.market_id || '',
@@ -404,7 +432,7 @@ function orderEditorModal() {
     const image = product?.image_url;
     return `<div class="order-edit-row ${item.id ? '' : 'is-new'}" data-order-draft-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><div class="order-edit-product"><button class="order-item-thumb image-preview-trigger" data-preview-image="${esc(image || '')}" aria-label="${image ? `放大查看 ${esc(product?.name || item.product_name)}` : '沒有商品圖片'}" ${image ? '' : 'disabled'}>${image ? `<img src="${esc(image)}" alt=""/>` : ''}</button>${item.id ? `<div><strong>${esc(item.product_name)}</strong><small>${esc(market?.name || '未分類賣場')}</small></div>` : `<div class="order-add-selects"><label>賣場<select data-order-draft-market><option value="">選擇賣場</option>${marketOptions}</select></label><label>商品<select data-order-draft-product ${item.market_id ? '' : 'disabled'}><option value="">選擇商品</option>${productOptions}</select></label></div>`}</div><label class="order-edit-number">數量<input data-order-draft-quantity type="number" min="0" step="1" value="${item.quantity}"/></label><label class="order-edit-number">成本<input data-order-draft-cost type="number" min="0" step="1" value="${item.unit_cost}" ${state.orderCostOverrideReady ? '' : 'disabled'}/></label><label class="order-edit-number">單價<input data-order-draft-price type="number" min="0" step="0.01" value="${item.unit_price}"/></label><button class="order-edit-remove" data-remove-order-draft-item="${esc(item.key)}" type="button">${item.id ? '設為 0' : '移除'}</button>${item.original_unit_price != null ? `<small class="adjusted-note">原始單價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
   }).join('');
-  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select><button class="btn btn-light" type="button" data-save-order-delivery>儲存取貨方式</button></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；手動修改成本後，商品清單的成本變動不會覆蓋此訂單。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-phone">聯絡電話（可留白）</label><input id="order-phone" type="tel" autocomplete="tel" value="${esc(draft.phone)}"/><small>電話修改後，按下方「儲存訂單」才會生效。</small></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select><button class="btn btn-light" type="button" data-save-order-delivery>儲存取貨方式</button></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；手動修改成本後，商品清單的成本變動不會覆蓋此訂單。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
 }
 
 function adminView() {
@@ -1015,6 +1043,7 @@ async function updateOrderStatus(id, status) {
 
 function syncOrderDraftFromForm() {
   if (!state.orderDraft) return;
+  state.orderDraft.phone = document.querySelector('#order-phone')?.value ?? state.orderDraft.phone;
   state.orderDraft.delivery_method = document.querySelector('#order-delivery')?.value ?? state.orderDraft.delivery_method;
   const previous = new Map(state.orderDraft.items.map((item) => [item.key, item]));
   state.orderDraft.items = [...document.querySelectorAll('[data-order-draft-row]')].map((row) => {
@@ -1098,12 +1127,21 @@ async function saveOrderEditor() {
   if (button) { button.disabled = true; button.textContent = '儲存中…'; }
   const payload = items.map((item) => ({ id: item.id || null, product_id: item.product_id || null, quantity: Number(item.quantity), unit_price: Number(item.unit_price), ...(item.cost_edited || Number(item.unit_cost) !== Number(item.base_unit_cost) ? { unit_cost: Number(item.unit_cost) } : {}) }));
   try {
-    const { error } = await supabase.rpc('admin_save_order_items', { p_order_id: state.orderDraft.orderId, p_items: payload, p_delivery_method: state.orderDraft.delivery_method });
+    const phone = state.orderDraft.phone.trim();
+    const originalPhone = state.orders.find((order) => order.id === state.orderDraft.orderId)?.phone || '';
+    const phoneChanged = phone !== originalPhone;
+    const { error } = await supabase.rpc(phoneChanged ? 'admin_save_order_with_phone' : 'admin_save_order_items', {
+      p_order_id: state.orderDraft.orderId, p_items: payload, p_delivery_method: state.orderDraft.delivery_method,
+      ...(phoneChanged ? { p_phone: phone } : {}),
+    });
     if (error) throw error;
     state.orderEditorReady = true; state.orderCostOverrideReady = true;
     await Promise.all([loadOrders(), loadMarkets()]); await loadProductCosts();
-    state.modal = null; state.editingOrderId = null; state.orderDraft = null; render(); renderToast('訂單與取貨方式已更新');
+    state.modal = null; state.editingOrderId = null; state.orderDraft = null; render(); renderToast('訂單已更新');
   } catch (error) {
+    if (/admin_save_order_with_phone|schema cache|could not find/i.test(error.message || '') && state.orderDraft.phone.trim() !== (state.orders.find((order) => order.id === state.orderDraft.orderId)?.phone || '')) {
+      renderToast('請先在 Supabase 執行 order_phone_upgrade.sql'); return;
+    }
     if (/admin_save_order_items|schema cache|could not find/i.test(error.message || '')) state.orderCostOverrideReady = false;
     renderToast(state.orderCostOverrideReady ? friendlyError(error) : '請先在 Supabase 執行 order_cost_override_upgrade.sql');
   } finally {
@@ -1539,6 +1577,7 @@ function bindBackdropClose(backdrop, close) {
 
 function bind() {
   document.querySelector('[data-save-order-delivery]')?.addEventListener('click', saveOrderDelivery);
+  document.querySelector('#order-phone')?.addEventListener('input', (event) => { if (state.orderDraft) state.orderDraft.phone = event.target.value; });
   document.querySelector('#order-delivery')?.addEventListener('change', syncOrderDraftFromForm);
   bindModalScroll();
   document.querySelectorAll('[data-batch-item]').forEach((button) => button.addEventListener('click', () => changeBatchQuantity(button.dataset.batchItem, Number(button.dataset.batchDelta))));
