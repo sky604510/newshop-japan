@@ -410,6 +410,7 @@ function createOrderDraft(order) {
     recipient_name: order.recipient_name,
     phone: order.phone || '',
     delivery_method: order.delivery_method,
+    splitSelection: new Set(),
     items: (order.order_items || []).map((item) => ({
       key: item.id, id: item.id, product_id: item.product_id || '', market_id: item.market_id || '',
       product_name: item.product_name, quantity: Number(item.quantity), unit_price: Number(item.unit_price),
@@ -419,23 +420,25 @@ function createOrderDraft(order) {
   };
 }
 
+function orderEditorRow(item, draft) {
+  const market = state.markets.find((entry) => entry.id === item.market_id);
+  const product = state.products.find((entry) => entry.id === item.product_id);
+  const marketOptions = state.markets.map((entry) => `<option value="${entry.id}" ${entry.id === item.market_id ? 'selected' : ''}>${esc(entry.name)}</option>`).join('');
+  const productOptions = (market?.products || []).map((entry) => {
+    const unavailable = Number(entry.stock) <= 0 && entry.id !== item.product_id;
+    const label = `${entry.name}${Number(entry.stock) <= 0 ? '（無庫存）' : `（可用 ${entry.stock}）`}`;
+    return `<option value="${entry.id}" ${entry.id === item.product_id ? 'selected' : ''} ${unavailable ? 'disabled' : ''}>${esc(label)}</option>`;
+  }).join('');
+  const image = product?.image_url;
+  return `<div class="order-edit-row ${item.id ? '' : 'is-new'}" data-order-draft-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><label class="order-edit-split" title="${item.id ? '選取此品項分單' : '新增品項請先儲存訂單'}"><input type="checkbox" data-order-split-item="${esc(item.id || '')}" aria-label="選取 ${esc(item.product_name || '新增品項')} 分單" ${draft.splitSelection.has(item.id) ? 'checked' : ''} ${item.id && !state.busy ? '' : 'disabled'}/></label><div class="order-edit-product"><button class="order-item-thumb image-preview-trigger" data-preview-image="${esc(image || '')}" aria-label="${image ? `放大查看 ${esc(product?.name || item.product_name)}` : '沒有商品圖片'}" ${image ? '' : 'disabled'}>${image ? `<img src="${esc(image)}" alt=""/>` : ''}</button>${item.id ? `<div><strong>${esc(item.product_name)}</strong><small>${esc(market?.name || '未分類賣場')}</small></div>` : `<div class="order-add-selects"><label>賣場<select data-order-draft-market><option value="">選擇賣場</option>${marketOptions}</select></label><label>商品<select data-order-draft-product ${item.market_id ? '' : 'disabled'}><option value="">選擇商品</option>${productOptions}</select></label></div>`}</div><label class="order-edit-number">數量<input data-order-draft-quantity type="number" min="0" step="1" value="${item.quantity}"/></label><label class="order-edit-number">成本<input data-order-draft-cost type="number" min="0" step="1" value="${item.unit_cost}" ${state.orderCostOverrideReady ? '' : 'disabled'}/></label><label class="order-edit-number">單價<input data-order-draft-price type="number" min="0" step="0.01" value="${item.unit_price}"/></label><button class="order-edit-remove" data-remove-order-draft-item="${esc(item.key)}" type="button">${item.id ? '設為 0' : '移除'}</button>${item.original_unit_price != null ? `<small class="adjusted-note">原始單價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
+}
+
 function orderEditorModal() {
   const order = state.orders.find((entry) => entry.id === state.editingOrderId);
   const draft = state.orderDraft;
   if (!order || !draft) return '';
-  const rows = draft.items.map((item) => {
-    const market = state.markets.find((entry) => entry.id === item.market_id);
-    const product = state.products.find((entry) => entry.id === item.product_id);
-    const marketOptions = state.markets.map((entry) => `<option value="${entry.id}" ${entry.id === item.market_id ? 'selected' : ''}>${esc(entry.name)}</option>`).join('');
-    const productOptions = (market?.products || []).map((entry) => {
-      const unavailable = Number(entry.stock) <= 0 && entry.id !== item.product_id;
-      const label = `${entry.name}${Number(entry.stock) <= 0 ? '（無庫存）' : `（可用 ${entry.stock}）`}`;
-      return `<option value="${entry.id}" ${entry.id === item.product_id ? 'selected' : ''} ${unavailable ? 'disabled' : ''}>${esc(label)}</option>`;
-    }).join('');
-    const image = product?.image_url;
-    return `<div class="order-edit-row ${item.id ? '' : 'is-new'}" data-order-draft-row data-key="${esc(item.key)}" data-id="${esc(item.id || '')}"><div class="order-edit-product"><button class="order-item-thumb image-preview-trigger" data-preview-image="${esc(image || '')}" aria-label="${image ? `放大查看 ${esc(product?.name || item.product_name)}` : '沒有商品圖片'}" ${image ? '' : 'disabled'}>${image ? `<img src="${esc(image)}" alt=""/>` : ''}</button>${item.id ? `<div><strong>${esc(item.product_name)}</strong><small>${esc(market?.name || '未分類賣場')}</small></div>` : `<div class="order-add-selects"><label>賣場<select data-order-draft-market><option value="">選擇賣場</option>${marketOptions}</select></label><label>商品<select data-order-draft-product ${item.market_id ? '' : 'disabled'}><option value="">選擇商品</option>${productOptions}</select></label></div>`}</div><label class="order-edit-number">數量<input data-order-draft-quantity type="number" min="0" step="1" value="${item.quantity}"/></label><label class="order-edit-number">成本<input data-order-draft-cost type="number" min="0" step="1" value="${item.unit_cost}" ${state.orderCostOverrideReady ? '' : 'disabled'}/></label><label class="order-edit-number">單價<input data-order-draft-price type="number" min="0" step="0.01" value="${item.unit_price}"/></label><button class="order-edit-remove" data-remove-order-draft-item="${esc(item.key)}" type="button">${item.id ? '設為 0' : '移除'}</button>${item.original_unit_price != null ? `<small class="adjusted-note">原始單價 ${money(item.original_unit_price)}</small>` : ''}</div>`;
-  }).join('');
-  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-recipient">收件人（必填）</label><input id="order-recipient" autocomplete="name" value="${esc(draft.recipient_name)}"/></div><div class="field"><label for="order-phone">聯絡電話（可留白）</label><input id="order-phone" type="tel" autocomplete="tel" value="${esc(draft.phone)}"/><small>收件人與電話修改後，按下方「儲存訂單」才會生效。</small></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select><button class="btn btn-light" type="button" data-save-order-delivery>儲存取貨方式</button></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；手動修改成本後，商品清單的成本變動不會覆蓋此訂單。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
+  const rows = draft.items.map((item) => orderEditorRow(item, draft)).join('');
+  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-recipient">收件人（必填）</label><input id="order-recipient" autocomplete="name" value="${esc(draft.recipient_name)}"/></div><div class="field"><label for="order-phone">聯絡電話（可留白）</label><input id="order-phone" type="tel" autocomplete="tel" value="${esc(draft.phone)}"/><small>收件人與電話修改後，按下方「儲存訂單」才會生效。</small></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select></div><div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；手動修改成本後，商品清單的成本變動不會覆蓋此訂單。分單只移動已儲存的整筆品項，不會重新扣庫存。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-light" data-action="split-order" ${draft.splitSelection.size && !state.busy ? '' : 'disabled'}>分單${draft.splitSelection.size ? `（${draft.splitSelection.size}）` : ''}</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
 }
 
 function adminView() {
@@ -1090,32 +1093,64 @@ function closeActiveModal() {
   state.modal = null; render();
 }
 
+function orderEditorRowElement(item) {
+  const template = document.createElement('template');
+  template.innerHTML = orderEditorRow(item, state.orderDraft);
+  return template.content.firstElementChild;
+}
+
+function refreshOrderEditorRow(item) {
+  const existing = [...document.querySelectorAll('.order-editor-items [data-order-draft-row]')].find((row) => row.dataset.key === item.key);
+  existing?.replaceWith(orderEditorRowElement(item));
+  updateOrderDraftTotal();
+}
+
 function addOrderDraftItem() {
   syncOrderDraftFromForm();
-  state.orderDraft.items.push({ key: crypto.randomUUID(), id: null, market_id: '', product_id: '', product_name: '', quantity: 1, unit_cost: 0, base_unit_cost: 0, cost_edited: false, unit_price: 0, original_unit_price: null });
-  render();
-  requestAnimationFrame(() => document.querySelector('.order-edit-row:last-child')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  const item = { key: crypto.randomUUID(), id: null, market_id: '', product_id: '', product_name: '', quantity: 1, unit_cost: 0, base_unit_cost: 0, cost_edited: false, unit_price: 0, original_unit_price: null };
+  state.orderDraft.items.push(item);
+  const container = document.querySelector('.order-editor-items');
+  container?.querySelector('.empty')?.remove();
+  const row = orderEditorRowElement(item);
+  container?.append(row);
+  row.scrollIntoView({ block: 'nearest' });
+  updateOrderDraftTotal();
 }
 
 function changeOrderDraftMarket(key, marketId) {
   syncOrderDraftFromForm();
   const item = state.orderDraft.items.find((entry) => entry.key === key); if (!item) return;
-  item.market_id = marketId; item.product_id = ''; item.product_name = ''; item.unit_cost = 0; item.base_unit_cost = 0; item.cost_edited = false; item.unit_price = 0; render();
+  item.market_id = marketId; item.product_id = ''; item.product_name = ''; item.unit_cost = 0; item.base_unit_cost = 0; item.cost_edited = false; item.unit_price = 0;
+  refreshOrderEditorRow(item);
 }
 
 function changeOrderDraftProduct(key, productId) {
   syncOrderDraftFromForm();
   const item = state.orderDraft.items.find((entry) => entry.key === key); const product = state.products.find((entry) => entry.id === productId);
-  if (!item || !product || Number(product.stock) <= 0) return;
-  item.market_id = product.market_id; item.product_id = product.id; item.product_name = product.name; item.unit_cost = Math.round(Number(product.cost || 0)); item.base_unit_cost = item.unit_cost; item.cost_edited = false; item.unit_price = Number(product.price); render();
+  if (!item) return;
+  if (!productId) {
+    item.product_id = ''; item.product_name = ''; item.unit_cost = 0; item.base_unit_cost = 0; item.cost_edited = false; item.unit_price = 0;
+    refreshOrderEditorRow(item);
+    return;
+  }
+  if (!product || Number(product.stock) <= 0) return;
+  item.market_id = product.market_id; item.product_id = product.id; item.product_name = product.name; item.unit_cost = Math.round(Number(product.cost || 0)); item.base_unit_cost = item.unit_cost; item.cost_edited = false; item.unit_price = Number(product.price);
+  refreshOrderEditorRow(item);
 }
 
 function removeOrderDraftItem(key) {
   syncOrderDraftFromForm();
   const item = state.orderDraft.items.find((entry) => entry.key === key); if (!item) return;
   if (item.id) item.quantity = 0;
-  else state.orderDraft.items = state.orderDraft.items.filter((entry) => entry.key !== key);
-  render();
+  else {
+    state.orderDraft.items = state.orderDraft.items.filter((entry) => entry.key !== key);
+    const row = [...document.querySelectorAll('.order-editor-items [data-order-draft-row]')].find((entry) => entry.dataset.key === key);
+    row?.remove();
+    const container = document.querySelector('.order-editor-items');
+    if (container && !container.querySelector('[data-order-draft-row]')) container.innerHTML = '<div class="empty">此訂單目前沒有商品</div>';
+  }
+  if (item.id) refreshOrderEditorRow(item);
+  else updateOrderDraftTotal();
 }
 
 async function saveOrderEditor() {
@@ -1153,6 +1188,55 @@ async function saveOrderEditor() {
   } finally {
     state.busy = false;
     if (button?.isConnected) { button.disabled = false; button.textContent = '儲存訂單'; }
+  }
+}
+
+function orderDraftHasUnsavedChanges(order, draft) {
+  if (draft.recipient_name.trim() !== order.recipient_name || draft.phone.trim() !== (order.phone || '') || draft.delivery_method !== order.delivery_method) return true;
+  if (draft.items.length !== (order.order_items || []).length) return true;
+  const savedItems = new Map((order.order_items || []).map((item) => [item.id, item]));
+  return draft.items.some((item) => {
+    const saved = savedItems.get(item.id);
+    return !saved || Number(item.quantity) !== Number(saved.quantity) || Number(item.unit_price) !== Number(saved.unit_price) || Number(item.unit_cost) !== Math.round(currentOrderItemCost(saved));
+  });
+}
+
+async function splitOrderEditor() {
+  if (!isManager() || !state.orderDraft || state.busy) return;
+  syncOrderDraftFromForm();
+  const order = state.orders.find((entry) => entry.id === state.orderDraft.orderId);
+  if (!order) return;
+  const itemIds = [...state.orderDraft.splitSelection];
+  if (!itemIds.length) { renderToast('請先勾選要分單的品項'); return; }
+  if (itemIds.length >= (order.order_items || []).length) { renderToast('原訂單至少要保留一個品項'); return; }
+  if (orderDraftHasUnsavedChanges(order, state.orderDraft)) { renderToast('請先儲存訂單的其他修改，再重新勾選分單'); return; }
+  if (!window.confirm(`確定將 ${itemIds.length} 筆品項移到新訂單嗎？原訂單與新訂單的金額會重新計算。`)) return;
+
+  const button = document.querySelector('[data-action="split-order"]');
+  const saveButton = document.querySelector('[data-action="save-order-editor"]');
+  state.busy = true;
+  if (button) { button.disabled = true; button.textContent = '分單中…'; }
+  if (saveButton) saveButton.disabled = true;
+  let newOrderNumber = '';
+  try {
+    const { data, error } = await supabase.rpc('admin_split_order_items', { p_order_id: order.id, p_order_item_ids: itemIds });
+    if (error) throw error;
+    newOrderNumber = data;
+    await loadOrders();
+    state.modal = null; state.editingOrderId = null; state.orderDraft = null;
+    render(); renderToast(`分單完成，新訂單：${newOrderNumber}`);
+  } catch (error) {
+    if (newOrderNumber) {
+      state.modal = null; state.editingOrderId = null; state.orderDraft = null;
+      render(); renderToast(`新訂單 ${newOrderNumber} 已建立，但清單載入失敗，請重新整理頁面`);
+    } else if (/admin_split_order_items|schema cache|could not find/i.test(error.message || '')) renderToast('請先在 Supabase 執行 order_split_upgrade.sql');
+    else if (/ORDER_CANCELLED/i.test(error.message || '')) renderToast('已取消的訂單不能分單');
+    else if (/ORDER_ITEM_NOT_FOUND|ORDER_ITEMS_CHANGED|DUPLICATE_OR_INVALID_ITEM/i.test(error.message || '')) renderToast('訂單品項已變更，請重新整理後再試');
+    else renderToast(friendlyError(error));
+  } finally {
+    state.busy = false;
+    if (button?.isConnected) { button.disabled = false; button.textContent = `分單（${itemIds.length}）`; }
+    if (saveButton?.isConnected) saveButton.disabled = false;
   }
 }
 
@@ -1546,28 +1630,6 @@ async function exportExcel() {
   } catch (error) { renderToast(`Excel 產生失敗：${friendlyError(error)}`); }
 }
 
-async function saveOrderDelivery() {
-  if (!isManager() || !state.orderDraft || state.busy) return;
-  syncOrderDraftFromForm();
-  const delivery = state.orderDraft.delivery_method;
-  if (!deliveryOptions.includes(delivery)) return;
-  const button = document.querySelector('[data-save-order-delivery]');
-  const saveButton = document.querySelector('[data-action="save-order-editor"]');
-  if (button) button.disabled = true;
-  if (saveButton) saveButton.disabled = true;
-  try {
-    const { data, error } = await supabase.from('orders').update({ delivery_method: delivery }).eq('id', state.orderDraft.orderId).select('id,delivery_method').single();
-    if (error) throw error;
-    await loadOrders();
-    const order = state.orders.find((entry) => entry.id === data.id);
-    if (!order || order.delivery_method !== delivery) throw new Error('取貨方式未寫入，請重試');
-    const label = document.querySelector(`[data-order-delivery-label="${data.id}"]`);
-    if (label) label.textContent = `${order.phone ? `${order.phone}・` : ''}${order.delivery_method}`;
-    renderToast('取貨方式已儲存');
-  } catch (error) { renderToast(friendlyError(error)); }
-  finally { if (button) button.disabled = false; if (saveButton) saveButton.disabled = false; }
-}
-
 function bindBackdropClose(backdrop, close) {
   if (!backdrop) return;
   let pressedOutside = false;
@@ -1582,7 +1644,6 @@ function bindBackdropClose(backdrop, close) {
 }
 
 function bind() {
-  document.querySelector('[data-save-order-delivery]')?.addEventListener('click', saveOrderDelivery);
   document.querySelector('#order-recipient')?.addEventListener('input', (event) => { if (state.orderDraft) state.orderDraft.recipient_name = event.target.value; });
   document.querySelector('#order-phone')?.addEventListener('input', (event) => { if (state.orderDraft) state.orderDraft.phone = event.target.value; });
   document.querySelector('#order-delivery')?.addEventListener('change', syncOrderDraftFromForm);
@@ -1674,18 +1735,40 @@ function bind() {
   document.querySelectorAll('[data-action="close-order-editor"]').forEach((button) => button.addEventListener('click', closeOrderEditor));
   document.querySelector('[data-action="add-order-item"]')?.addEventListener('click', addOrderDraftItem);
   document.querySelector('[data-action="save-order-editor"]')?.addEventListener('click', saveOrderEditor);
-  document.querySelectorAll('[data-order-draft-market]').forEach((select) => select.addEventListener('change', () => changeOrderDraftMarket(select.closest('[data-order-draft-row]').dataset.key, select.value)));
-  document.querySelectorAll('[data-order-draft-product]').forEach((select) => select.addEventListener('change', () => changeOrderDraftProduct(select.closest('[data-order-draft-row]').dataset.key, select.value)));
-  document.querySelectorAll('[data-order-draft-quantity],[data-order-draft-price]').forEach((input) => input.addEventListener('input', updateOrderDraftTotal));
-  document.querySelectorAll('[data-order-draft-cost]').forEach((input) => input.addEventListener('input', () => {
+  document.querySelector('[data-action="split-order"]')?.addEventListener('click', splitOrderEditor);
+  const orderItems = document.querySelector('.order-editor-items');
+  orderItems?.addEventListener('change', (event) => {
+    const input = event.target;
     const key = input.closest('[data-order-draft-row]')?.dataset.key;
-    const item = state.orderDraft?.items.find((entry) => entry.key === key);
-    if (item) item.cost_edited = true;
-    syncOrderDraftFromForm();
-  }));
-  document.querySelectorAll('[data-remove-order-draft-item]').forEach((button) => button.addEventListener('click', () => removeOrderDraftItem(button.dataset.removeOrderDraftItem)));
+    if (!key) return;
+    if (input.matches('[data-order-draft-market]')) changeOrderDraftMarket(key, input.value);
+    else if (input.matches('[data-order-draft-product]')) changeOrderDraftProduct(key, input.value);
+    else if (input.matches('[data-order-split-item]') && state.orderDraft && input.dataset.orderSplitItem) {
+      if (input.checked) state.orderDraft.splitSelection.add(input.dataset.orderSplitItem);
+      else state.orderDraft.splitSelection.delete(input.dataset.orderSplitItem);
+      const button = document.querySelector('[data-action="split-order"]');
+      if (button) { button.disabled = !state.orderDraft.splitSelection.size; button.textContent = state.orderDraft.splitSelection.size ? `分單（${state.orderDraft.splitSelection.size}）` : '分單'; }
+    }
+  });
+  orderItems?.addEventListener('input', (event) => {
+    const input = event.target;
+    if (input.matches('[data-order-draft-quantity],[data-order-draft-price]')) updateOrderDraftTotal();
+    else if (input.matches('[data-order-draft-cost]')) {
+      const key = input.closest('[data-order-draft-row]')?.dataset.key;
+      const item = state.orderDraft?.items.find((entry) => entry.key === key);
+      if (item) item.cost_edited = true;
+      syncOrderDraftFromForm();
+    }
+  });
+  orderItems?.addEventListener('click', (event) => {
+    const removeButton = event.target.closest('[data-remove-order-draft-item]');
+    if (removeButton) { removeOrderDraftItem(removeButton.dataset.removeOrderDraftItem); return; }
+    const previewButton = event.target.closest('[data-preview-image]');
+    if (previewButton?.dataset.previewImage) { state.previewImage = previewButton.dataset.previewImage; render(); }
+  });
   document.querySelectorAll('[data-delete-order]').forEach((button) => button.addEventListener('click', () => deleteOrder(button.dataset.deleteOrder)));
   document.querySelectorAll('[data-preview-image]').forEach((button) => button.addEventListener('click', () => {
+    if (button.closest('.order-editor-items')) return;
     if (!button.dataset.previewImage) return;
     state.previewImage = button.dataset.previewImage; render();
   }));
