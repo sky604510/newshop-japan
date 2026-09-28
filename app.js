@@ -977,7 +977,7 @@ async function saveMarket() {
       if (error) throw error;
     }
     if (removedImagePaths.length) await supabase.storage.from('product-images').remove([...new Set(removedImagePaths)]);
-    await loadMarkets(); await loadProductCosts(); state.modal = null; state.marketDraft = null; state.editingMarketId = null; successMessage = existing ? '賣場與品項已更新' : '賣場已建立';
+    await Promise.all([loadMarkets(), loadOrders()]); await loadProductCosts(); state.modal = null; state.marketDraft = null; state.editingMarketId = null; successMessage = existing ? '賣場與品項已更新' : '賣場已建立';
   } catch (error) { renderToast(friendlyError(error)); }
   finally {
     state.busy = false;
