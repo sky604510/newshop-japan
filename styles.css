@@ -304,6 +304,7 @@ body.modal-open .pwa-install { display:none; }
 .shipment-order-group .shipment-items { gap:5px; padding:7px; }
 .shipment-order-group .shipment-item { border-style:dashed; }
 .shipment-send { min-width:92px; }
+.shipment-header-actions { display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end; }
 .shipment-date-controls { display:grid; gap:10px; min-width:170px; }
 .shipment-date-group { display:grid; gap:6px; padding:8px; border:1px solid var(--line); border-radius:12px; background:#fffafd; }
 .shipment-date-group > strong { font-size:11px; color:var(--rose-deep); }
@@ -486,6 +487,9 @@ body.modal-open .pwa-install { display:none; }
   .admin-page .section-head h2 { margin:5px 0 8px; font-size:27px; line-height:1.15; }
   .admin-page .section-head p { margin:0; font-size:12px; }
   .admin-page .section-head > .btn { width:100%; }
+  .shipment-header-actions { width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .shipment-header-actions .btn { min-width:0; padding:11px 8px; font-size:12px; }
+  .shipment-header-actions .btn:only-child { grid-column:1/-1; }
   .admin-stats { grid-template-columns:1fr 1fr; gap:8px; }
   .admin-tabs { top:8px; grid-template-columns:1fr 1fr; gap:4px; padding:5px; border-radius:16px; }
   .admin-tabs button { padding:11px 6px; font-size:12px; }

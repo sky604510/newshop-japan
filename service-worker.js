@@ -1,9 +1,9 @@
-const CACHE_NAME = 'newshop-shell-v31';
+const CACHE_NAME = 'newshop-shell-v32';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/styles.css?v=34',
-  '/app.js?v=42',
+  '/styles.css?v=35',
+  '/app.js?v=43',
   '/profit-sharing.js?v=1',
   '/pwa.js?v=27',
   '/manifest.webmanifest?v=2',
