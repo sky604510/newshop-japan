@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createProfitSharing } from './profit-sharing.js?v=1';
 
 const supabase = createClient(
   'https://qikmnuchhfmkseoenawr.supabase.co',
@@ -56,9 +57,14 @@ function friendlyError(error) {
   if (/order_empty/i.test(message)) return '訂單至少需要保留一個商品';
   if (/product_not_available/i.test(message)) return '部分品項已下架，請重新整理購物車';
   if (/duplicate_product_name/i.test(message)) return '同一賣場不能有相同名稱的商品';
+  if (/PROFIT_RESTORE_CONFIRM_REQUIRED/i.test(message)) return '此品項已完成分潤，請重新按還原並確認分潤提醒';
   if (/login_required/i.test(message)) return '請先登入會員';
   return message;
 }
+
+const profitSharing = createProfitSharing({ state, supabase, esc, money, getCost: currentOrderItemCost, render, toast: renderToast, bindBackdropClose,
+  reload: () => Promise.all([loadOrders(), loadFulfillmentChecks(), loadMarkets()]),
+});
 
 function normalizeMarkets(markets) {
   return (markets || []).map((market, marketIndex) => ({
@@ -212,10 +218,11 @@ async function syncSession(session) {
   state.user = session?.user || null;
   if (!state.user) {
     state.profile = null; state.orders = [];
+    await profitSharing.load();
     if (state.view === 'admin') state.view = 'shop';
     await loadMarkets(); render(); return;
   }
-  try { await loadProfile(); await Promise.all([loadOrders(), loadMarkets(), loadCustomers(), loadProcurementChecks(), loadFulfillmentChecks()]); await loadProductCosts(); }
+  try { await loadProfile(); await Promise.all([loadOrders(), loadMarkets(), loadCustomers(), loadProcurementChecks(), loadFulfillmentChecks(), profitSharing.load()]); await loadProductCosts(); }
   catch (error) { renderToast(friendlyError(error)); }
   render();
 }
@@ -466,8 +473,8 @@ function adminView() {
   const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><button class="btn btn-primary" data-action="export-shipment">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${state.shipmentView === 'pending' ? 'active' : ''}" data-shipment-view="pending">待發貨</button><button class="${state.shipmentView === 'shipped' ? 'active' : ''}" data-shipment-view="shipped">已發貨</button><button class="${state.shipmentView === 'completed' ? 'active' : ''}" data-shipment-view="completed" ${state.shipmentCompletionReady ? '' : 'disabled'}>已完成</button></div>${state.shipmentView === 'shipped' ? `<div class="shipment-bulk-actions"><button class="btn btn-primary" data-complete-selected ${state.shipmentRecipientSelection.size && state.shipmentCompletionReady ? '' : 'disabled'}>將選取的收件人移至已完成${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}</button></div>` : ''}${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th><th>${state.shipmentView === 'pending' ? '操作' : state.shipmentView === 'shipped' ? '發貨日期' : '發貨日期／操作'}</th></tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentView === 'pending' ? '目前沒有待發貨商品' : state.shipmentView === 'shipped' ? '目前沒有已發貨商品' : '目前沒有已完成商品'}</div>`}</section>`;
   const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>只有收件人為必填，信箱與電話皆可留空。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>信箱（選填）</th><th>電話（選填）</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
   const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>拖曳調整同一區內的順序；可同時置頂多個賣場。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table market-sort-table"><thead><tr><th>排序</th><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody id="market-sort-list">${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
-  const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, customers: customerPanel, markets: marketPanel };
-  return `<main class="admin-page">${migrationNotice}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
+  const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, profits: state.adminTab === 'profits' ? profitSharing.panel() : '', customers: customerPanel, markets: marketPanel };
+  return `<main class="admin-page">${migrationNotice}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'profits' ? 'active' : ''}" data-admin-tab="profits">分潤清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
 }
 
 function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
@@ -583,6 +590,7 @@ function modal() {
   if (state.modal === 'order-editor') return orderEditorModal();
   if (state.modal === 'market-editor') return marketEditorModal();
   if (state.modal === 'customer-editor') return customerEditorModal();
+  if (state.modal === 'profit-result') return profitSharing.modal();
   return '';
 }
 
@@ -1084,6 +1092,7 @@ function closeOrderEditor() {
 }
 
 function closeActiveModal() {
+  if (state.modal === 'profit-result') { profitSharing.close(); return; }
   if (state.modal === 'cart') { continueShopping(); return; }
   if (state.modal === 'checkout') persistCheckoutDraft();
   if (state.modal === 'order-editor') { state.editingOrderId = null; state.orderDraft = null; }
@@ -1310,9 +1319,15 @@ async function setShipmentCompleted(recipientKeys, completed) {
   const recipients = shipmentSummaries(completed ? 'shipped' : 'completed').filter((entry) => recipientKeys.includes(entry.key));
   if (!recipients.length) return;
   const itemCount = recipients.reduce((sum, entry) => sum + entry.items.length, 0);
-  if (!window.confirm(`確定將 ${recipients.length} 位收件人的 ${itemCount} 個品項${completed ? '移至已完成' : '還原至已發貨'}嗎？`)) return;
+  const ids = recipients.flatMap((recipient) => recipient.items.map((item) => item.id));
+  let warning = { count: 0, message: '' };
+  if (!completed) {
+    try { warning = await profitSharing.restoreWarning(ids); }
+    catch (error) { renderToast(friendlyError(error)); return; }
+  }
+  if (!window.confirm(`${warning.message ? `${warning.message}\n\n` : ''}確定將 ${recipients.length} 位收件人的 ${itemCount} 個品項${completed ? '移至已完成' : '還原至已發貨'}嗎？`)) return;
   const { error } = await supabase.rpc('admin_set_shipment_items_completed', {
-    p_order_item_ids: recipients.flatMap((recipient) => recipient.items.map((item) => item.id)), p_completed: completed,
+    p_order_item_ids: ids, p_completed: completed, ...(warning.count ? { p_acknowledge_profit_share: true } : {}),
   });
   if (error) { renderToast(friendlyError(error)); await loadFulfillmentChecks(); render(); return; }
   await loadFulfillmentChecks(); render(); renderToast(completed ? '已移入已完成' : '已還原至已發貨');
@@ -1328,10 +1343,14 @@ async function updateShipmentDate(orderItemId, shippedAt) {
 }
 
 async function restoreShipmentItem(orderItemId) {
-  const { error } = await supabase.rpc('admin_restore_order_item', { p_order_item_id: orderItemId });
+  let warning;
+  try { warning = await profitSharing.restoreWarning([orderItemId]); }
+  catch (error) { renderToast(friendlyError(error)); return; }
+  if (warning.count && !window.confirm(`${warning.message}\n\n確定還原至待發貨嗎？`)) return;
+  const { error } = await supabase.rpc('admin_restore_order_item', { p_order_item_id: orderItemId, ...(warning.count ? { p_acknowledge_profit_share: true } : {}) });
   if (error) { renderToast(friendlyError(error)); return; }
   const current = state.fulfillmentChecks.get(orderItemId) || { order_item_id: orderItemId, purchase_confirmed: false };
-  state.fulfillmentChecks.set(orderItemId, { ...current, shipped_at: null });
+  state.fulfillmentChecks.set(orderItemId, { ...current, shipped_at: null, completed_at: null });
   render(); renderToast('商品已還原至待發貨清單');
 }
 
@@ -1644,12 +1663,13 @@ function bindBackdropClose(backdrop, close) {
 }
 
 function bind() {
+  profitSharing.bind();
   document.querySelector('#order-recipient')?.addEventListener('input', (event) => { if (state.orderDraft) state.orderDraft.recipient_name = event.target.value; });
   document.querySelector('#order-phone')?.addEventListener('input', (event) => { if (state.orderDraft) state.orderDraft.phone = event.target.value; });
   document.querySelector('#order-delivery')?.addEventListener('change', syncOrderDraftFromForm);
   bindModalScroll();
   document.querySelectorAll('[data-batch-item]').forEach((button) => button.addEventListener('click', () => changeBatchQuantity(button.dataset.batchItem, Number(button.dataset.batchDelta))));
-  bindBackdropClose(document.querySelector('.modal-backdrop'), closeActiveModal);
+  if (state.modal !== 'profit-result') bindBackdropClose(document.querySelector('.modal-backdrop'), closeActiveModal);
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => { state.view = button.dataset.view; if (state.view === 'admin') state.adminTab = 'markets'; if ((state.view === 'orders' || state.view === 'admin') && state.user) { await Promise.all([loadOrders(), loadMarkets(), loadCustomers(), loadProcurementChecks(), loadFulfillmentChecks()]); await loadProductCosts(); } render(); }));
   document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => { const target = button.dataset.scroll; if (state.view !== 'shop') { state.view = 'shop'; render(); requestAnimationFrame(() => document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' })); } else document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' }); }));
   document.querySelectorAll('[data-open-market]').forEach((button) => button.addEventListener('click', () => openMarket(button.dataset.openMarket)));
@@ -1682,6 +1702,11 @@ function bind() {
   document.querySelectorAll('[data-shipment-snapshot]').forEach((button) => button.addEventListener('click', () => openStatementSnapshot(button.dataset.shipmentSnapshot, button)));
   document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', async () => {
     const nextTab = button.dataset.adminTab;
+    if (state.adminTab === 'profits') profitSharing.capture();
+    if (['profits', 'shipments'].includes(nextTab)) {
+      try { await Promise.all([loadOrders(), loadFulfillmentChecks(), profitSharing.load()]); await loadProductCosts(); }
+      catch (error) { renderToast(friendlyError(error)); return; }
+    }
     if (nextTab === 'summary') {
       try {
         await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks()]);
