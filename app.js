@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createProfitSharing } from './profit-sharing.js?v=1';
-import { createDepositManagement } from './deposit-management.js?v=1';
+import { createProfitSharing } from './profit-sharing.js?v=2';
+import { createDepositManagement } from './deposit-management.js?v=4';
 
 const supabase = createClient(
   'https://qikmnuchhfmkseoenawr.supabase.co',
@@ -21,7 +21,7 @@ const state = {
   authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, shipmentView: 'pending',
   procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), shipmentRecipientSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true,
   operationsReady: true, costReady: true, pricingReady: true, adminOpsReady: true, orderEditorReady: true, sortingReady: true,
-  fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, orderCostOverrideReady: true, shipmentBusy: false, depositReady: true,
+  fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, orderCostOverrideReady: true, shipmentBusy: false, depositReady: true, depositDetailsReady: true,
 };
 
 const money = (value) => `NT$ ${Number(value || 0).toLocaleString('zh-TW')}`;
@@ -60,13 +60,16 @@ function friendlyError(error) {
   if (/duplicate_product_name/i.test(message)) return '同一賣場不能有相同名稱的商品';
   if (/INVALID_DEPOSIT_AMOUNT/i.test(message)) return '訂金須為非負的台幣整數元';
   if (/DEPOSIT_BELOW_REFUNDED/i.test(message)) return '訂金金額不能低於已退款總額';
-  if (/place_order_with_deposit|admin_save_order_with_deposit/i.test(message)) return '訂金功能尚未啟用，請先執行 order_deposit_upgrade.sql';
+  if (/INVALID_DEPOSIT_DEDUCTION|DEDUCTION_EXCEEDS_PRODUCTS/i.test(message)) return '內扣金額須為整數，且不能超過商品金額或訂金金額';
+  if (/DEPOSIT_REQUIRED_FOR_DETAILS/i.test(message)) return '請先勾選有訂金並填寫訂金金額';
+  if (/with_deposit_details/i.test(message)) return '請先在 Supabase 執行 order_deposit_details_upgrade.sql';
+  if (/with_deposit/i.test(message)) return '訂金功能尚未啟用，請先執行對應的訂金 SQL 升級檔';
   if (/PROFIT_RESTORE_CONFIRM_REQUIRED/i.test(message)) return '此品項已完成分潤，請重新按還原並確認分潤提醒';
   if (/login_required/i.test(message)) return '請先登入會員';
   return message;
 }
 
-const profitSharing = createProfitSharing({ state, supabase, esc, money, getCost: currentOrderItemCost, render, toast: renderToast, bindBackdropClose,
+const profitSharing = createProfitSharing({ state, supabase, esc, money, getCost: currentOrderItemCost, getDeduction: (order, item) => orderDeductionShares(order).get(item.id) || 0, render, toast: renderToast, bindBackdropClose,
   reload: () => Promise.all([loadOrders(), loadFulfillmentChecks(), loadMarkets()]),
 });
 const depositManagement = createDepositManagement({ state, supabase, esc, money, render, toast: renderToast, bindBackdropClose });
@@ -173,16 +176,24 @@ async function loadProfile() {
   state.profile = data;
 }
 
-const orderColumns = (columns) => state.depositReady ? columns.replace('order_number,', 'order_number,deposit_amount,') : columns;
+const orderColumns = (columns) => state.depositReady ? columns.replace('order_number,', `order_number,deposit_amount,${state.depositDetailsReady ? 'deposit_note,deposit_deduction,' : ''}`) : columns;
 
 async function loadOrders() {
   if (!state.user) { state.orders = []; return; }
   state.depositReady = true;
+  state.depositDetailsReady = true;
   let result = await supabase.from('orders')
     .select(orderColumns('id,order_number,user_id,account_email,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_cost_overridden,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)'))
     .order('created_at', { ascending: false });
+  if (result.error && /deposit_note|deposit_deduction/i.test(result.error.message || '')) {
+    state.depositDetailsReady = false;
+    result = await supabase.from('orders')
+      .select(orderColumns('id,order_number,user_id,account_email,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_cost_overridden,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)'))
+      .order('created_at', { ascending: false });
+  }
   if (result.error && /deposit_amount/i.test(result.error.message || '')) {
     state.depositReady = false;
+    state.depositDetailsReady = false;
     result = await supabase.from('orders')
       .select(orderColumns('id,order_number,user_id,account_email,customer_id,recipient_name,phone,delivery_method,note,status,total_amount,created_at,order_items(id,product_id,market_id,product_name,unit_cost,unit_cost_overridden,unit_price,original_unit_price,price_adjusted_at,quantity,subtotal)'))
       .order('created_at', { ascending: false });
@@ -319,13 +330,15 @@ function marketSummaries(includeZero = false) {
     market,
     rows: market.products.map((product) => {
       const itemOrders = state.orders.filter((order) => order.status !== 'cancelled').flatMap((order) =>
-        (order.order_items || []).filter((item) => item.product_id === product.id).map((item) => ({ ...item, order })),
+        (order.order_items || []).filter((item) => item.product_id === product.id).map((item) => ({ ...item, order, deduction: orderDeductionShares(order).get(item.id) || 0 })),
       );
       const quantity = itemOrders.reduce((sum, item) => sum + Number(item.quantity), 0); const currentCost = Number(product.cost || 0);
-      const revenue = itemOrders.reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+      const grossRevenue = itemOrders.reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+      const deduction = itemOrders.reduce((sum, item) => sum + item.deduction, 0);
+      const revenue = grossRevenue - deduction;
       const totalCost = itemOrders.reduce((sum, item) => sum + currentOrderItemCost(item) * Number(item.quantity), 0);
-      const cost = Math.round(quantity ? totalCost / quantity : currentCost); const price = quantity ? revenue / quantity : Number(product.price || 0);
-      return { product, quantity, cost, price, revenue, totalCost, profit: revenue - totalCost, buyers: new Set(itemOrders.map((item) => item.order.customer_id || item.order.phone)).size, procured: Boolean(state.procurementChecks.get(product.id)?.is_purchased) };
+      const cost = Math.round(quantity ? totalCost / quantity : currentCost); const price = quantity ? grossRevenue / quantity : Number(product.price || 0);
+      return { product, quantity, cost, price, revenue, deduction, totalCost, profit: revenue - totalCost, buyers: new Set(itemOrders.map((item) => item.order.customer_id || item.order.phone)).size, procured: Boolean(state.procurementChecks.get(product.id)?.is_purchased) };
     }).filter((row) => includeZero || row.quantity > 0),
   })).filter((entry) => includeZero || entry.rows.length);
 }
@@ -344,6 +357,19 @@ function latestCustomerOrder(customer) {
   return state.orders.find((order) => order.customer_id === customer.id || (!order.customer_id && customer.phone && order.phone === customer.phone));
 }
 
+function orderDeductionShares(order) {
+  const items = order.order_items || [];
+  const gross = items.reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+  const deduction = Number(order.deposit_deduction || 0);
+  const shares = new Map(); let running = 0, assigned = 0;
+  for (const item of items) {
+    running += Number(item.unit_price) * Number(item.quantity);
+    const next = gross ? Math.round(deduction * running / gross) : 0;
+    shares.set(item.id, next - assigned); assigned = next;
+  }
+  return shares;
+}
+
 function shipmentSummaries(view = 'pending') {
   const recipients = [];
   const customers = new Map(state.customers.map((customer) => [customer.id, customer]));
@@ -360,7 +386,7 @@ function shipmentSummaries(view = 'pending') {
     const matches = recipients.filter((entry) => entry.name === name && (
       (phone && entry.phones.has(phone)) || (!phone && entry.hasBlankPhone) || (email && entry.emails.has(email)) || (order.customer_id && entry.customerIds.has(order.customer_id))
     ));
-    const recipient = matches[0] || { key: order.id, name, recipient: order.recipient_name, phones: new Set(), hasBlankPhone: false, emails: new Set(), customerIds: new Set(), phoneLabels: new Set(), deliveries: new Set(), accounts: new Set(), items: [], amount: 0, profit: 0 };
+    const recipient = matches[0] || { key: order.id, name, recipient: order.recipient_name, phones: new Set(), hasBlankPhone: false, emails: new Set(), customerIds: new Set(), phoneLabels: new Set(), deliveries: new Set(), accounts: new Set(), items: [], amount: 0, deduction: 0, profit: 0 };
     if (!matches.length) recipients.push(recipient);
     for (const duplicate of matches.slice(1)) {
       duplicate.phones.forEach((value) => recipient.phones.add(value));
@@ -372,6 +398,7 @@ function shipmentSummaries(view = 'pending') {
       duplicate.accounts.forEach((value) => recipient.accounts.add(value));
       recipient.items.push(...duplicate.items);
       recipient.amount += duplicate.amount;
+      recipient.deduction += duplicate.deduction;
       recipient.profit += duplicate.profit;
       recipients.splice(recipients.indexOf(duplicate), 1);
     }
@@ -382,13 +409,14 @@ function shipmentSummaries(view = 'pending') {
     if (order.phone?.trim()) recipient.phoneLabels.add(order.phone.trim());
     recipient.deliveries.add(order.delivery_method);
     if (order.account_email) recipient.accounts.add(order.account_email);
+    const deductionShares = orderDeductionShares(order);
     for (const item of orderItems) {
       const fulfillment = state.fulfillmentChecks.get(item.id);
       const product = state.products.find((entry) => entry.id === item.product_id);
-      const unitCost = currentOrderItemCost(item); const quantity = Number(item.quantity); const amount = Number(item.unit_price) * quantity; const profit = amount - unitCost * quantity;
+      const unitCost = currentOrderItemCost(item); const quantity = Number(item.quantity); const amount = Number(item.unit_price) * quantity; const deduction = deductionShares.get(item.id) || 0; const profit = amount - deduction - unitCost * quantity;
       const imageUrl = product?.image_url || '';
-      recipient.items.push({ id: item.id, order_id: order.id, order_number: order.order_number, order_note: order.note || '', name: item.product_name, image_url: imageUrl, quantity, amount, profit, shipped_at: fulfillment?.shipped_at || null });
-      recipient.amount += amount; recipient.profit += profit;
+      recipient.items.push({ id: item.id, order_id: order.id, order_number: order.order_number, order_note: order.note || '', deposit_amount: Number(order.deposit_amount || 0), deposit_note: order.deposit_note || '', deduction, name: item.product_name, image_url: imageUrl, quantity, amount, profit, shipped_at: fulfillment?.shipped_at || null });
+      recipient.amount += amount - deduction; recipient.deduction += deduction; recipient.profit += profit;
     }
   }
   return recipients.map((recipient) => ({ ...recipient, phone: [...recipient.phoneLabels].join('、'), delivery: [...recipient.deliveries].join('、'), account: [...recipient.accounts].join('、') || '未記錄' }));
@@ -397,9 +425,9 @@ function shipmentSummaries(view = 'pending') {
 function shipmentOrderGroups(recipient) {
   const groups = new Map();
   for (const item of recipient.items) {
-    if (!groups.has(item.order_id)) groups.set(item.order_id, { order_id: item.order_id, order_number: item.order_number, note: item.order_note || '', items: [], quantity: 0, amount: 0, profit: 0 });
+    if (!groups.has(item.order_id)) groups.set(item.order_id, { order_id: item.order_id, order_number: item.order_number, note: item.order_note || '', deposit_amount: item.deposit_amount, deposit_note: item.deposit_note, items: [], quantity: 0, gross: 0, deduction: 0, amount: 0, profit: 0 });
     const group = groups.get(item.order_id);
-    group.items.push(item); group.quantity += item.quantity; group.amount += item.amount; group.profit += item.profit;
+    group.items.push(item); group.quantity += item.quantity; group.gross += item.amount; group.deduction += item.deduction; group.amount += item.amount - item.deduction; group.profit += item.profit;
   }
   return [...groups.values()];
 }
@@ -408,8 +436,12 @@ function shipmentRecipientNotes(recipient) {
   return `<div class="shipment-recipient-notes">${shipmentOrderGroups(recipient).map((group) => `<label><span>${esc(group.order_number)} 備註</span><textarea data-shipment-note-input="${group.order_id}" rows="2" placeholder="無備註">${esc(group.note)}</textarea><button class="btn btn-light" data-save-shipment-note="${group.order_id}" type="button">儲存備註</button></label>`).join('')}</div>`;
 }
 
+function shipmentDepositInfo(recipient) {
+  return shipmentOrderGroups(recipient).filter((group) => group.deposit_amount > 0).map((group) => `<div class="shipment-deposit-info"><strong>${esc(group.order_number)} 訂金 ${money(group.deposit_amount)}</strong>${group.deposit_note ? `<small>訂金備註：${esc(group.deposit_note)}</small>` : ''}${group.deduction ? `<small>本清單商品內扣 ${money(group.deduction)}</small>` : ''}</div>`).join('');
+}
+
 function shipmentOrderDetails(recipient, view = 'pending') {
-  return shipmentOrderGroups(recipient).map((group) => `<section class="shipment-order-group"><header><strong>${esc(group.order_number)}</strong><span>小計：${group.quantity} 件・${money(group.amount)}・獲利 ${money(group.profit)}</span></header><div class="shipment-items">${group.items.map((item) => `<div class="shipment-item ${view === 'pending' ? 'selectable' : ''}">${view === 'pending' ? `<input class="shipment-select-check" data-shipment-select="${item.id}" data-shipment-group="${esc(recipient.key)}" type="checkbox" aria-label="選取發貨 ${esc(item.name)}" ${state.shipmentSelection.has(item.id) ? 'checked' : ''}/>` : ''}<button class="shipment-thumb image-preview-trigger" data-preview-image="${esc(item.image_url || '')}" aria-label="${item.image_url ? `放大查看 ${esc(item.name)}` : '沒有商品圖片'}" ${item.image_url ? '' : 'disabled'}>${item.image_url ? `<img src="${esc(item.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(item.name)}</strong><small>數量 ${item.quantity}・金額 ${money(item.amount)}・獲利 ${money(item.profit)}</small></span></div>`).join('')}</div></section>`).join('');
+  return shipmentOrderGroups(recipient).map((group) => `<section class="shipment-order-group"><header><strong>${esc(group.order_number)}</strong><span>小計：${group.quantity} 件・${money(group.amount)}${group.deduction ? `（商品 ${money(group.gross)}－內扣 ${money(group.deduction)}）` : ''}・獲利 ${money(group.profit)}</span></header><div class="shipment-items">${group.items.map((item) => `<div class="shipment-item ${view === 'pending' ? 'selectable' : ''}">${view === 'pending' ? `<input class="shipment-select-check" data-shipment-select="${item.id}" data-shipment-group="${esc(recipient.key)}" type="checkbox" aria-label="選取發貨 ${esc(item.name)}" ${state.shipmentSelection.has(item.id) ? 'checked' : ''}/>` : ''}<button class="shipment-thumb image-preview-trigger" data-preview-image="${esc(item.image_url || '')}" aria-label="${item.image_url ? `放大查看 ${esc(item.name)}` : '沒有商品圖片'}" ${item.image_url ? '' : 'disabled'}>${item.image_url ? `<img src="${esc(item.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(item.name)}</strong><small>數量 ${item.quantity}・金額 ${money(item.amount)}・獲利 ${money(item.profit)}</small></span></div>`).join('')}</div></section>`).join('');
 }
 
 function shipmentDateControls(recipient) {
@@ -433,6 +465,9 @@ function createOrderDraft(order) {
     delivery_method: order.delivery_method,
     hasDeposit: Number(order.deposit_amount || 0) > 0,
     depositAmount: Number(order.deposit_amount || 0) > 0 ? String(order.deposit_amount) : '',
+    depositNote: order.deposit_note || '',
+    deductProductAmount: Number(order.deposit_deduction || 0) > 0,
+    deductionAmount: Number(order.deposit_deduction || 0) > 0 ? String(order.deposit_deduction) : '',
     splitSelection: new Set(),
     items: (order.order_items || []).map((item) => ({
       key: item.id, id: item.id, product_id: item.product_id || '', market_id: item.market_id || '',
@@ -461,7 +496,7 @@ function orderEditorModal() {
   const draft = state.orderDraft;
   if (!order || !draft) return '';
   const rows = draft.items.map((item) => orderEditorRow(item, draft)).join('');
-  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-recipient">收件人（必填）</label><input id="order-recipient" autocomplete="name" value="${esc(draft.recipient_name)}"/></div><div class="field"><label for="order-phone">聯絡電話（可留白）</label><input id="order-phone" type="tel" autocomplete="tel" value="${esc(draft.phone)}"/><small>收件人與電話修改後，按下方「儲存訂單」才會生效。</small></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select></div>${depositFields('order', draft.hasDeposit, draft.depositAmount)}<div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；手動修改成本後，商品清單的成本變動不會覆蓋此訂單。分單只移動已儲存的整筆品項，不會重新扣庫存。</p><div class="order-editor-footer"><strong data-order-draft-total>目前小計 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-light" data-action="split-order" ${draft.splitSelection.size && !state.busy ? '' : 'disabled'}>分單${draft.splitSelection.size ? `（${draft.splitSelection.size}）` : ''}</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal order-editor-modal"><div class="modal-head"><div><span class="eyebrow">EDIT ORDER</span><h2>編輯訂單 ${esc(order.order_number)}</h2><p>${esc(order.recipient_name)}・${esc(order.account_email || '帳號未記錄')}</p></div><button class="close" data-action="close-order-editor">×</button></div><div class="field"><label for="order-recipient">收件人（必填）</label><input id="order-recipient" autocomplete="name" value="${esc(draft.recipient_name)}"/></div><div class="field"><label for="order-phone">聯絡電話（可留白）</label><input id="order-phone" type="tel" autocomplete="tel" value="${esc(draft.phone)}"/><small>收件人與電話修改後，按下方「儲存訂單」才會生效。</small></div><div class="field"><label for="order-delivery">取貨方式</label><select id="order-delivery">${deliverySelect(draft.delivery_method)}</select></div>${depositFields('order', draft.hasDeposit, draft.depositAmount, draft.depositNote, draft.deductProductAmount, draft.deductionAmount)}<div class="order-editor-items">${rows || '<div class="empty">此訂單目前沒有商品</div>'}</div><button class="btn btn-light order-add-item" data-action="add-order-item">＋ 添加商品</button><p class="draft-hint">數量設為 0 會刪除該品項；手動修改成本後，商品清單的成本變動不會覆蓋此訂單。分單只移動已儲存的整筆品項，不會重新扣庫存。</p><div class="order-editor-footer"><strong data-order-draft-total>訂單金額 ${money(draft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0) - (draft.hasDeposit && draft.deductProductAmount ? Number(draft.deductionAmount || 0) : 0))}</strong><div><button class="btn btn-light" data-action="close-order-editor">取消</button><button class="btn btn-light" data-action="split-order" ${draft.splitSelection.size && !state.busy ? '' : 'disabled'}>分單${draft.splitSelection.size ? `（${draft.splitSelection.size}）` : ''}</button><button class="btn btn-primary" data-action="save-order-editor" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存訂單'}</button></div></div></div></div>`;
 }
 
 function adminView() {
@@ -480,11 +515,11 @@ function adminView() {
   const shipmentSelectedCount = selectedShipmentRecipients().reduce((sum, recipient) => sum + recipient.items.length, 0);
   const shipmentRows = shipments.map((recipient) => {
 
-    return `<tr><td>${state.shipmentView === 'shipped' ? `<label class="shipment-recipient-check"><input data-complete-recipient="${esc(recipient.key)}" type="checkbox" aria-label="選取 ${esc(recipient.recipient)} 移至已完成" ${state.shipmentRecipientSelection.has(recipient.key) ? 'checked' : ''} ${state.shipmentCompletionReady ? '' : 'disabled'}/><strong>${esc(recipient.recipient)}</strong></label><button class="btn btn-light shipment-snapshot" type="button" data-shipment-snapshot="${esc(recipient.key)}">快照</button>` : `<strong>${esc(recipient.recipient)}</strong>`}<small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentView)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td>${state.shipmentView === 'pending' ? '' : `<td>${state.shipmentView === 'shipped' ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<div class="shipment-date-controls">${shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label><span>${esc(item.name)}・${esc(item.shipped_at || '')}</span></label>`).join('')}</div>`).join('')}</div><button class="btn btn-light shipment-uncomplete" data-uncomplete-recipient="${esc(recipient.key)}" ${state.shipmentCompletionReady ? '' : 'disabled'}>還原至已發貨</button>`}</td>`}</tr>`;
+    return `<tr><td>${state.shipmentView === 'shipped' ? `<label class="shipment-recipient-check"><input data-complete-recipient="${esc(recipient.key)}" type="checkbox" aria-label="選取 ${esc(recipient.recipient)} 移至已完成" ${state.shipmentRecipientSelection.has(recipient.key) ? 'checked' : ''} ${state.shipmentCompletionReady ? '' : 'disabled'}/><strong>${esc(recipient.recipient)}</strong></label><button class="btn btn-light shipment-snapshot" type="button" data-shipment-snapshot="${esc(recipient.key)}">快照</button>` : `<strong>${esc(recipient.recipient)}</strong>`}<small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}${shipmentDepositInfo(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentView)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td>${state.shipmentView === 'pending' ? '' : `<td>${state.shipmentView === 'shipped' ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<div class="shipment-date-controls">${shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label><span>${esc(item.name)}・${esc(item.shipped_at || '')}</span></label>`).join('')}</div>`).join('')}</div><button class="btn btn-light shipment-uncomplete" data-uncomplete-recipient="${esc(recipient.key)}" ${state.shipmentCompletionReady ? '' : 'disabled'}>還原至已發貨</button>`}</td>`}</tr>`;
   }).join('');
-  const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
+  const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}${row.deduction ? `<small>已扣商品內扣 ${money(row.deduction)}</small>` : ''}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}${state.fulfillmentReady && !state.shipmentCompletionReady ? `<div class="setup-notice">請執行 <strong>shipment_completion_upgrade.sql</strong>，才能使用已完成及還原功能；原有發貨歷史仍保留在已發貨。</div>` : ''}`;
-  const orderCostNotice = (state.orderCostOverrideReady ? '' : '<div class="setup-notice">請執行 <strong>order_cost_override_upgrade.sql</strong>，才能保存訂單品項的手動成本。</div>') + (state.depositReady ? '' : '<div class="setup-notice">請執行 <strong>order_deposit_upgrade.sql</strong> 啟用訂金功能；既有訂單與結帳仍可使用。</div>');
+  const orderCostNotice = (state.orderCostOverrideReady ? '' : '<div class="setup-notice">請執行 <strong>order_cost_override_upgrade.sql</strong>，才能保存訂單品項的手動成本。</div>') + (state.depositReady ? '' : '<div class="setup-notice">請執行 <strong>order_deposit_upgrade.sql</strong> 啟用訂金功能；既有訂單與結帳仍可使用。</div>') + (state.depositReady && !state.depositDetailsReady ? '<div class="setup-notice">請執行 <strong>order_deposit_details_upgrade.sql</strong>，啟用訂金備註與商品內扣。</div>' : '');
   const orderPanel = `<section class="panel order-panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史清單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整訂單 →</div><div class="table-wrap order-table-wrap"><table class="admin-table order-management-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>訂金備註</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
   const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div><div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div></section>`;
   const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><div class="shipment-header-actions">${state.shipmentView === 'pending' ? `<button class="btn btn-primary shipment-send" data-ship-selected ${shipmentSelectedCount && state.fulfillmentReady && !state.shipmentBusy ? '' : 'disabled'}>${state.shipmentBusy ? '發貨中…' : `發貨（${shipmentSelectedCount}）`}</button>` : ''}<button class="btn btn-primary" data-action="export-shipment">下載 Excel 報表</button></div></div><div class="sub-tabs"><button class="${state.shipmentView === 'pending' ? 'active' : ''}" data-shipment-view="pending">待發貨</button><button class="${state.shipmentView === 'shipped' ? 'active' : ''}" data-shipment-view="shipped">已發貨</button><button class="${state.shipmentView === 'completed' ? 'active' : ''}" data-shipment-view="completed" ${state.shipmentCompletionReady ? '' : 'disabled'}>已完成</button></div>${state.shipmentView === 'shipped' ? `<div class="shipment-bulk-actions"><button class="btn btn-primary" data-complete-selected ${state.shipmentRecipientSelection.size && state.shipmentCompletionReady ? '' : 'disabled'}>將選取的收件人移至已完成${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}</button></div>` : ''}${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th>${state.shipmentView === 'pending' ? '' : `<th>${state.shipmentView === 'shipped' ? '發貨日期' : '發貨日期／操作'}</th>`}</tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentView === 'pending' ? '目前沒有待發貨商品' : state.shipmentView === 'shipped' ? '目前沒有已發貨商品' : '目前沒有已完成商品'}</div>`}</section>`;
@@ -559,15 +594,24 @@ function authModal() {
 
 function forgotPasswordModal() { return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">PASSWORD RESET</span><h2>重設密碼</h2></div><button class="close" data-action="close">×</button></div><p>輸入註冊 Email，我們會寄送密碼重設連結。</p><div class="field"><label>Email</label><input id="recover-email" type="email" autocomplete="email" /></div><button class="btn btn-primary add-cart-wide" data-action="send-recovery">寄送重設信</button><button class="forgot-link" data-action="back-login">返回登入</button></div></div>`; }
 function newPasswordModal() { return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">NEW PASSWORD</span><h2>設定新密碼</h2></div></div><div class="field"><label>新密碼</label><input id="new-password" type="password" autocomplete="new-password" /></div><div class="field"><label>再次輸入</label><input id="confirm-password" type="password" autocomplete="new-password" /></div><button class="btn btn-primary add-cart-wide" data-action="update-password">更新密碼</button></div></div>`; }
-function depositFields(prefix, hasDeposit, amount) {
-  return `<div class="deposit-section"><label class="inline-check"><input id="${prefix}-has-deposit" type="checkbox" ${hasDeposit ? 'checked' : ''} ${state.depositReady ? '' : 'disabled'}/> 有訂金</label><div class="field deposit-field" id="${prefix}-deposit-field" ${hasDeposit ? '' : 'hidden'}><label for="${prefix}-deposit-amount">訂金金額（台幣／元）</label><input id="${prefix}-deposit-amount" type="number" inputmode="numeric" min="1" step="1" value="${esc(amount ?? '')}" ${hasDeposit && state.depositReady ? '' : 'disabled'}/><small>僅作備註紀錄，不影響訂單金額、成本或分潤。</small></div></div>`;
+function depositFields(prefix, hasDeposit, amount, note = '', deduct = false, deductionAmount = '') {
+  return `<div class="deposit-section"><label class="inline-check"><input id="${prefix}-has-deposit" type="checkbox" ${hasDeposit ? 'checked' : ''} ${state.depositReady ? '' : 'disabled'}/> 有訂金</label><div class="deposit-details" id="${prefix}-deposit-field" ${hasDeposit ? '' : 'hidden'}><div class="field deposit-field"><label for="${prefix}-deposit-amount">訂金金額（台幣／元）</label><input id="${prefix}-deposit-amount" type="number" inputmode="numeric" min="1" step="1" value="${esc(amount ?? '')}" ${hasDeposit && state.depositReady ? '' : 'disabled'}/><small>訂金金額僅作紀錄，不直接扣除商品金額。</small></div><div class="field"><label for="${prefix}-deposit-note">訂金備註</label><textarea id="${prefix}-deposit-note" rows="2" placeholder="訂金相關說明（選填）" ${state.depositDetailsReady ? '' : 'disabled'}>${esc(note)}</textarea></div><label class="inline-check deposit-deduct-check"><input id="${prefix}-deduct-product" type="checkbox" ${deduct ? 'checked' : ''} ${state.depositDetailsReady ? '' : 'disabled'}/> 內扣商品金額</label><div class="field deposit-deduction-field" id="${prefix}-deduction-field" ${deduct ? '' : 'hidden'}><label for="${prefix}-deduction-amount">內扣金額（台幣／元）</label><input id="${prefix}-deduction-amount" type="number" inputmode="numeric" min="1" step="1" value="${esc(deductionAmount)}" ${hasDeposit && deduct && state.depositDetailsReady ? '' : 'disabled'}/></div><small>訂單金額＝商品金額－內扣金額</small><strong id="${prefix}-final-amount"></strong></div></div>`;
 }
 
-function updateDepositFields(prefix) {
+function updateDepositFields(prefix, gross = 0) {
   const check = document.querySelector(`#${prefix}-has-deposit`), input = document.querySelector(`#${prefix}-deposit-amount`);
   if (!check || !input) return;
   document.querySelector(`#${prefix}-deposit-field`).hidden = !check.checked;
   input.disabled = !check.checked || !state.depositReady;
+  const deduct = document.querySelector(`#${prefix}-deduct-product`), deduction = document.querySelector(`#${prefix}-deduction-amount`);
+  document.querySelector(`#${prefix}-deduction-field`).hidden = !check.checked || !deduct.checked;
+  deduction.disabled = !check.checked || !deduct.checked || !state.depositDetailsReady;
+  const net = gross - (check.checked && deduct.checked ? Number(deduction.value || 0) : 0);
+  document.querySelector(`#${prefix}-final-amount`).textContent = `訂單金額 ${money(net)}`;
+  if (prefix === 'checkout') {
+    const button = document.querySelector('[data-action="checkout"]');
+    if (button && !state.busy) button.textContent = `${state.checkoutMode === 'regular' ? '代客送出訂單' : '送出訂單'} ・ ${money(net)}`;
+  }
 }
 
 function readDeposit(prefix) {
@@ -578,15 +622,27 @@ function readDeposit(prefix) {
   return amount;
 }
 
+function readDepositDetails(prefix, gross) {
+  const amount = readDeposit(prefix);
+  if (!amount) return { amount: 0, note: '', deduction: 0 };
+  const note = document.querySelector(`#${prefix}-deposit-note`)?.value.trim() || '';
+  const enabled = document.querySelector(`#${prefix}-deduct-product`)?.checked;
+  const raw = document.querySelector(`#${prefix}-deduction-amount`)?.value || '';
+  const deduction = enabled ? Number(raw) : 0;
+  if ((note || enabled) && !state.depositDetailsReady) throw new Error('請先啟用訂金備註與內扣功能');
+  if (enabled && (!raw || !Number.isSafeInteger(deduction) || deduction <= 0 || deduction > gross || deduction > amount)) throw new Error('內扣金額須為大於 0 的整數，且不能超過商品金額或訂金金額');
+  return { amount, note, deduction };
+}
+
 function orderDepositSummary(order) {
   const amount = Number(order.deposit_amount || 0);
-  return amount > 0 ? `<small class="order-deposit-summary">訂金備註 ${money(amount)}</small>` : '<small class="order-deposit-summary">無訂金</small>';
+  return amount > 0 ? `<small class="order-deposit-summary">訂金 ${money(amount)}${order.deposit_note ? `<br/>備註：${esc(order.deposit_note)}` : ''}${Number(order.deposit_deduction || 0) > 0 ? `<br/>商品內扣 ${money(order.deposit_deduction)}` : ''}</small>` : '<small class="order-deposit-summary">無訂金</small>';
 }
 
 function checkoutModal() {
   const draft = state.checkoutDraft || {}; const regulars = state.customers.filter((customer) => customer.is_regular);
   const adminModes = isManager() ? `<div class="auth-tabs"><button class="${state.checkoutMode === 'general' ? 'active' : ''}" data-checkout-mode="general">一般模式</button><button class="${state.checkoutMode === 'regular' ? 'active' : ''}" data-checkout-mode="regular">常客代下單</button></div>${state.checkoutMode === 'regular' ? `<div class="field"><label>選擇常客</label><select id="regular-customer"><option value="">請選擇</option>${regulars.map((customer) => `<option value="${customer.id}" ${draft.customerId === customer.id ? 'selected' : ''}>${esc(customer.recipient_name)}${customer.phone ? `・${esc(customer.phone)}` : ''}${customer.is_vip ? '・VIP' : ''}</option>`).join('')}</select></div>` : ''}` : '';
-  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">CHECKOUT</span><h2>確認訂單</h2></div><button class="close" data-action="close">×</button></div>${adminModes}<div class="field"><label>收件人（必填）</label><input id="customer" autocomplete="name" value="${esc(draft.recipient || '')}" /></div><div class="field"><label>聯絡電話（選填）</label><input id="phone" autocomplete="tel" value="${esc(draft.phone || '')}" /></div><div class="field"><label>取貨方式</label><select id="delivery">${deliverySelect(draft.delivery || '面交取貨')}</select></div><div class="field"><label>訂單備註</label><input id="note" value="${esc(draft.note || '')}" placeholder="顏色、尺寸或其他需求（選填）" /></div>${depositFields('checkout', Boolean(draft.hasDeposit), draft.depositAmount)}<p class="draft-hint">輸入內容會自動保存在這台裝置，切換分頁也不會消失。</p><button class="btn btn-primary add-cart-wide" data-action="checkout" ${state.busy ? 'disabled' : ''}>${state.busy ? '送出中…' : `${state.checkoutMode === 'regular' ? '代客送出訂單' : '送出訂單'} ・ ${money(cartTotal())}`}</button></div></div>`;
+  return `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><span class="eyebrow">CHECKOUT</span><h2>確認訂單</h2></div><button class="close" data-action="close">×</button></div>${adminModes}<div class="field"><label>收件人（必填）</label><input id="customer" autocomplete="name" value="${esc(draft.recipient || '')}" /></div><div class="field"><label>聯絡電話（選填）</label><input id="phone" autocomplete="tel" value="${esc(draft.phone || '')}" /></div><div class="field"><label>取貨方式</label><select id="delivery">${deliverySelect(draft.delivery || '面交取貨')}</select></div><div class="field"><label>訂單備註</label><input id="note" value="${esc(draft.note || '')}" placeholder="顏色、尺寸或其他需求（選填）" /></div>${depositFields('checkout', Boolean(draft.hasDeposit), draft.depositAmount, draft.depositNote || '', Boolean(draft.deductProductAmount), draft.deductionAmount || '')}<p class="draft-hint">輸入內容會自動保存在這台裝置，切換分頁也不會消失。</p><button class="btn btn-primary add-cart-wide" data-action="checkout" ${state.busy ? 'disabled' : ''}>${state.busy ? '送出中…' : `${state.checkoutMode === 'regular' ? '代客送出訂單' : '送出訂單'} ・ ${money(cartTotal() - (draft.hasDeposit && draft.deductProductAmount ? Number(draft.deductionAmount || 0) : 0))}`}</button></div></div>`;
 }
 
 function customerEditorModal() {
@@ -857,13 +913,13 @@ async function checkout() {
   if (!recipient) { renderToast('請填寫收件人'); return; }
   if (state.checkoutMode === 'regular' && !state.checkoutDraft.customerId) { renderToast('請先選擇常客'); return; }
   let deposit;
-  try { deposit = readDeposit('checkout'); }
+  try { deposit = readDepositDetails('checkout', cartTotal()); }
   catch (error) { renderToast(error.message); return; }
   state.busy = true; render();
   const items = state.cart.map((item) => ({ product_id: item.product_id, quantity: item.qty }));
   const request = isManager()
-    ? supabase.rpc(state.depositReady ? 'admin_place_order_with_deposit' : 'admin_place_order', { p_customer_id: state.checkoutMode === 'regular' ? state.checkoutDraft.customerId : null, p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: items, ...(state.depositReady ? { p_deposit_amount: deposit } : {}) })
-    : supabase.rpc(state.depositReady ? 'place_order_with_deposit' : 'place_order', { p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: items, ...(state.depositReady ? { p_deposit_amount: deposit } : {}) });
+    ? supabase.rpc(state.depositDetailsReady ? 'admin_place_order_with_deposit_details' : state.depositReady ? 'admin_place_order_with_deposit' : 'admin_place_order', { p_customer_id: state.checkoutMode === 'regular' ? state.checkoutDraft.customerId : null, p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: items, ...(state.depositReady ? { p_deposit_amount: deposit.amount, ...(state.depositDetailsReady ? { p_deposit_note: deposit.note, p_deduction_amount: deposit.deduction } : {}) } : {}) })
+    : supabase.rpc(state.depositDetailsReady ? 'place_order_with_deposit_details' : state.depositReady ? 'place_order_with_deposit' : 'place_order', { p_recipient_name: recipient, p_phone: phone, p_delivery_method: delivery, p_note: note, p_items: items, ...(state.depositReady ? { p_deposit_amount: deposit.amount, ...(state.depositDetailsReady ? { p_deposit_note: deposit.note, p_deduction_amount: deposit.deduction } : {}) } : {}) });
   const { data: orderId, error } = await request;
   state.busy = false; if (error) { render(); renderToast(friendlyError(error)); return; }
   state.cart = []; saveCart(); state.checkoutDraft = {}; saveCheckoutDraft(); state.checkoutMode = 'general'; state.view = 'orders'; await Promise.all([loadOrders(), loadMarkets(), loadCustomers()]);
@@ -1109,6 +1165,9 @@ function syncOrderDraftFromForm() {
   state.orderDraft.delivery_method = document.querySelector('#order-delivery')?.value ?? state.orderDraft.delivery_method;
   state.orderDraft.hasDeposit = document.querySelector('#order-has-deposit')?.checked ?? state.orderDraft.hasDeposit;
   state.orderDraft.depositAmount = document.querySelector('#order-deposit-amount')?.value ?? state.orderDraft.depositAmount;
+  state.orderDraft.depositNote = document.querySelector('#order-deposit-note')?.value ?? state.orderDraft.depositNote;
+  state.orderDraft.deductProductAmount = document.querySelector('#order-deduct-product')?.checked ?? state.orderDraft.deductProductAmount;
+  state.orderDraft.deductionAmount = document.querySelector('#order-deduction-amount')?.value ?? state.orderDraft.deductionAmount;
   const previous = new Map(state.orderDraft.items.map((item) => [item.key, item]));
   state.orderDraft.items = [...document.querySelectorAll('[data-order-draft-row]')].map((row) => {
     const old = previous.get(row.dataset.key) || {};
@@ -1128,8 +1187,9 @@ function syncOrderDraftFromForm() {
 function updateOrderDraftTotal() {
   syncOrderDraftFromForm();
   const total = state.orderDraft.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
-  const output = document.querySelector('[data-order-draft-total]'); if (output) output.textContent = `目前小計 ${money(total)}`;
-  updateDepositFields('order');
+  const deduction = state.orderDraft.hasDeposit && state.orderDraft.deductProductAmount ? Number(state.orderDraft.deductionAmount || 0) : 0;
+  const output = document.querySelector('[data-order-draft-total]'); if (output) output.textContent = `訂單金額 ${money(total - deduction)}`;
+  updateDepositFields('order', total);
 }
 
 function openOrderEditor(orderId) {
@@ -1223,7 +1283,7 @@ async function saveOrderEditor() {
   if (!state.orderDraft.recipient_name.trim()) { renderToast('請填寫收件人'); return; }
   if (!items.some((item) => Number(item.quantity) > 0)) { renderToast('訂單至少需要保留一個商品'); return; }
   let deposit;
-  try { deposit = readDeposit('order'); }
+  try { deposit = readDepositDetails('order', items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0)); }
   catch (error) { renderToast(error.message); return; }
   state.busy = true;
   const button = document.querySelector('[data-action="save-order-editor"]');
@@ -1234,10 +1294,10 @@ async function saveOrderEditor() {
     const recipientName = state.orderDraft.recipient_name.trim();
     const original = state.orders.find((order) => order.id === state.orderDraft.orderId);
     const contactChanged = recipientName !== original?.recipient_name || phone !== (original?.phone || '');
-    const { error } = await supabase.rpc(state.depositReady ? 'admin_save_order_with_deposit' : contactChanged ? 'admin_save_order_with_recipient' : 'admin_save_order_items', {
+    const { error } = await supabase.rpc(state.depositDetailsReady ? 'admin_save_order_with_deposit_details' : state.depositReady ? 'admin_save_order_with_deposit' : contactChanged ? 'admin_save_order_with_recipient' : 'admin_save_order_items', {
       p_order_id: state.orderDraft.orderId, p_items: payload, p_delivery_method: state.orderDraft.delivery_method,
       ...(contactChanged || state.depositReady ? { p_recipient_name: recipientName, p_phone: phone } : {}),
-      ...(state.depositReady ? { p_deposit_amount: deposit } : {}),
+      ...(state.depositReady ? { p_deposit_amount: deposit.amount, ...(state.depositDetailsReady ? { p_deposit_note: deposit.note, p_deduction_amount: deposit.deduction } : {}) } : {}),
     });
     if (error) throw error;
     state.orderEditorReady = true; state.orderCostOverrideReady = true;
@@ -1258,6 +1318,8 @@ async function saveOrderEditor() {
 
 function orderDraftHasUnsavedChanges(order, draft) {
   if ((draft.hasDeposit ? Number(draft.depositAmount) : 0) !== Number(order.deposit_amount || 0)) return true;
+  if ((draft.hasDeposit ? draft.depositNote.trim() : '') !== (order.deposit_note || '')) return true;
+  if ((draft.hasDeposit && draft.deductProductAmount ? Number(draft.deductionAmount) : 0) !== Number(order.deposit_deduction || 0)) return true;
   if (draft.recipient_name.trim() !== order.recipient_name || draft.phone.trim() !== (order.phone || '') || draft.delivery_method !== order.delivery_method) return true;
   if (draft.items.length !== (order.order_items || []).length) return true;
   const savedItems = new Map((order.order_items || []).map((item) => [item.id, item]));
@@ -1285,7 +1347,7 @@ async function splitOrderEditor() {
   if (saveButton) saveButton.disabled = true;
   let newOrderNumber = '';
   try {
-    const { data, error } = await supabase.rpc('admin_split_order_items', { p_order_id: order.id, p_order_item_ids: itemIds });
+    const { data, error } = await supabase.rpc(state.depositDetailsReady ? 'admin_split_order_with_deposit_details' : 'admin_split_order_items', { p_order_id: order.id, p_order_item_ids: itemIds });
     if (error) throw error;
     newOrderNumber = data;
     await loadOrders();
@@ -1466,6 +1528,9 @@ function persistCheckoutDraft() {
   state.checkoutDraft = { ...state.checkoutDraft, recipient: document.querySelector('#customer')?.value || '', phone: document.querySelector('#phone')?.value || '', delivery: document.querySelector('#delivery')?.value || '面交取貨', note: document.querySelector('#note')?.value || '' };
   state.checkoutDraft.hasDeposit = Boolean(document.querySelector('#checkout-has-deposit')?.checked);
   state.checkoutDraft.depositAmount = document.querySelector('#checkout-deposit-amount')?.value || '';
+  state.checkoutDraft.depositNote = document.querySelector('#checkout-deposit-note')?.value || '';
+  state.checkoutDraft.deductProductAmount = Boolean(document.querySelector('#checkout-deduct-product')?.checked);
+  state.checkoutDraft.deductionAmount = document.querySelector('#checkout-deduction-amount')?.value || '';
   saveCheckoutDraft();
 }
 
@@ -1488,6 +1553,7 @@ function shipmentExportRows(history, recipients) {
     取貨方式: recipient.delivery, 訂單編號: item.order_number, 訂單備註: item.order_note,
     訂購商品: item.name, 數量: item.quantity, 金額: item.amount,
     總金額: index === 0 ? recipient.amount : '', 獲利: item.profit,
+    訂金: item.deposit_amount || '', 訂金備註: item.deposit_note || '', 商品內扣: item.deduction || '',
     ...(history ? { 發貨日期: item.shipped_at } : {}),
   })));
 }
@@ -1539,9 +1605,9 @@ function shipmentPackingSheet(XLSX, recipients) {
         rows.length === recipientStart ? recipient.recipient : '',
         item.name, item.quantity, item.amount,
         rows.length === recipientStart ? recipient.amount : '',
-        itemIndex === 0 ? group.note : '',
+        itemIndex === 0 ? [group.note, group.deposit_amount ? `訂金 ${money(group.deposit_amount)}` : '', group.deposit_note ? `訂金備註 ${group.deposit_note}` : '', group.deduction ? `商品內扣 ${money(group.deduction)}` : ''].filter(Boolean).join('；') : '',
       ]));
-      if (group.note && group.items.length > 1) merges.push({ s: { r: orderStart, c: 5 }, e: { r: rows.length - 1, c: 5 } });
+      if ((group.note || group.deposit_amount) && group.items.length > 1) merges.push({ s: { r: orderStart, c: 5 }, e: { r: rows.length - 1, c: 5 } });
     }
     if (recipient.items.length > 1) {
       merges.push({ s: { r: recipientStart, c: 0 }, e: { r: rows.length - 1, c: 0 } });
@@ -1587,6 +1653,12 @@ async function statementSnapshotCanvas(recipient) {
   const columns = [0, 140, 450, 526, 642, 772, width];
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
+  const depositDetails = shipmentOrderGroups(recipient).filter((group) => group.deposit_amount > 0).flatMap((group) => [
+    `${group.order_number} 訂金 ${money(group.deposit_amount)}${group.deduction ? `・本張內扣 ${money(group.deduction)}` : ''}`,
+    ...(group.deposit_note ? [`訂金備註：${group.deposit_note}`] : []),
+  ]);
+  ctx.font = '16px sans-serif';
+  const footerLines = depositDetails.flatMap((line) => statementTextLines(ctx, line, width - 44));
   const groups = shipmentOrderGroups(recipient).map((group) => {
     ctx.font = '15px sans-serif';
     const noteLines = statementTextLines(ctx, group.note, columns[6] - columns[5] - 20);
@@ -1603,10 +1675,11 @@ async function statementSnapshotCanvas(recipient) {
   const tableTop = 76;
   const headerHeight = 48;
   const tableBottom = tableTop + headerHeight + bodyHeight;
+  const footerHeight = 82 + footerLines.length * 24;
   canvas.width = width * 2;
-  canvas.height = (tableBottom + 30) * 2;
+  canvas.height = (tableBottom + footerHeight) * 2;
   ctx.scale(2, 2);
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, tableBottom + 30);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, tableBottom + footerHeight);
   ctx.fillStyle = '#241a20'; ctx.font = 'bold 28px sans-serif'; ctx.fillText('對帳單', 22, 48);
   ctx.fillStyle = '#fff0f5'; ctx.fillRect(0, tableTop, width, headerHeight);
   ctx.strokeStyle = '#e5bfce'; ctx.lineWidth = 1;
@@ -1654,6 +1727,10 @@ async function statementSnapshotCanvas(recipient) {
   line(0, tableTop, width, tableTop); line(0, tableTop + headerHeight, width, tableTop + headerHeight);
   line(0, tableBottom, width, tableBottom);
   columns.forEach((x) => line(x, tableTop, x, tableBottom));
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.font = '16px sans-serif'; ctx.fillStyle = '#51404a';
+  footerLines.forEach((lineText, index) => ctx.fillText(lineText, 22, tableBottom + 30 + index * 24));
+  ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#241a20';
+  ctx.fillText(`商品金額 ${money(recipient.amount + recipient.deduction)}－內扣 ${money(recipient.deduction)}＝總金額 ${money(recipient.amount)}`, 22, tableBottom + footerHeight - 20);
   return { canvas, missingImages: imageUrls.filter((url) => !images.get(url)).length };
 }
 
@@ -1688,7 +1765,7 @@ async function exportShipmentExcel() {
     const rows = shipmentExportRows(view !== 'pending', recipients);
     const sheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 提示: `目前沒有${label}資料` }]);
     sheet['!merges'] = shipmentRecipientMerges(recipients);
-    sheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 16 }, { wch: 20 }, { wch: 18 }, { wch: 26 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, ...(view !== 'pending' ? [{ wch: 14 }] : [])];
+    sheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 16 }, { wch: 20 }, { wch: 18 }, { wch: 26 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 28 }, { wch: 14 }, ...(view !== 'pending' ? [{ wch: 14 }] : [])];
     XLSX.utils.book_append_sheet(workbook, sheet, label);
     if (view === 'shipped') XLSX.utils.book_append_sheet(workbook, shipmentPackingSheet(XLSX, recipients), '對帳單');
     XLSX.writeFile(workbook, `NewShop${label}-${new Date().toLocaleDateString('en-CA')}.xlsx`, { cellStyles: true });
@@ -1705,7 +1782,7 @@ async function exportExcel() {
         電話: order.phone, 取貨方式: order.delivery_method, 商品品項: item.product_name, 數量: quantity,
         單件成本: unitCost, 售價: Number(item.unit_price), 成本合計: unitCost * quantity, 銷售小計: Number(item.subtotal),
         商品獲利: (Number(item.unit_price) - unitCost) * quantity, 原始售價: item.original_unit_price == null ? Number(item.unit_price) : Number(item.original_unit_price),
-        人工改價: item.original_unit_price == null ? '否' : '是', 訂單總額: Number(order.total_amount), 狀態: statusLabels[order.status] || order.status, 備註: order.note || '', 訂金: Number(order.deposit_amount || 0) };
+        人工改價: item.original_unit_price == null ? '否' : '是', 訂單總額: Number(order.total_amount), 狀態: statusLabels[order.status] || order.status, 備註: order.note || '', 訂金: Number(order.deposit_amount || 0), 訂金備註: order.deposit_note || '', 商品內扣: Number(order.deposit_deduction || 0) };
     }));
     const ordersSheet = XLSX.utils.json_to_sheet(orderRows.length ? orderRows : [{ 提示: '目前沒有訂單' }]); ordersSheet['!cols'] = [{ wch: 18 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 28 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 24 }];
     XLSX.utils.book_append_sheet(workbook, ordersSheet, '訂單');
@@ -1714,7 +1791,7 @@ async function exportExcel() {
     shipmentSheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 16 }, { wch: 20 }, { wch: 32 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(workbook, shipmentSheet, '發貨清單');
     for (const { market, rows } of marketSummaries(true)) {
-      const data = rows.map((row) => ({ 商品品項: row.product.name, 訂購總數量: row.quantity, 外幣成本: Number(row.product.foreign_cost || 0), 匯率: Number(row.product.exchange_rate || 0), 單件成本: row.cost, 售價: row.price, 成本合計: row.totalCost, 銷售合計: row.revenue, 購買人數: row.buyers, 商品獲利: row.profit, 已採購: row.procured ? '是' : '否', 目前後台庫存: Number(row.product.stock) }));
+      const data = rows.map((row) => ({ 商品品項: row.product.name, 訂購總數量: row.quantity, 外幣成本: Number(row.product.foreign_cost || 0), 匯率: Number(row.product.exchange_rate || 0), 單件成本: row.cost, 售價: row.price, 成本合計: row.totalCost, 銷售合計: row.revenue, 商品內扣: row.deduction, 購買人數: row.buyers, 商品獲利: row.profit, 已採購: row.procured ? '是' : '否', 目前後台庫存: Number(row.product.stock) }));
       const sheet = XLSX.utils.json_to_sheet(data); sheet['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
       XLSX.utils.book_append_sheet(workbook, sheet, safeSheetName(market.name, usedNames));
     }
@@ -1738,11 +1815,14 @@ function bindBackdropClose(backdrop, close) {
 function bind() {
   for (const prefix of ['checkout', 'order']) {
     const update = () => {
-      if (prefix === 'checkout') { persistCheckoutDraft(); updateDepositFields(prefix); }
+      if (prefix === 'checkout') { persistCheckoutDraft(); updateDepositFields(prefix, cartTotal()); }
       else { syncOrderDraftFromForm(); updateOrderDraftTotal(); }
     };
     document.querySelector(`#${prefix}-has-deposit`)?.addEventListener('change', update);
     document.querySelector(`#${prefix}-deposit-amount`)?.addEventListener('input', update);
+    document.querySelector(`#${prefix}-deposit-note`)?.addEventListener('input', update);
+    document.querySelector(`#${prefix}-deduct-product`)?.addEventListener('change', update);
+    document.querySelector(`#${prefix}-deduction-amount`)?.addEventListener('input', update);
   }
   profitSharing.bind();
   depositManagement.bind();

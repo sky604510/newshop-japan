@@ -22,20 +22,20 @@ export function calculateProfitShare(items, settings) {
   return { revenue: revenue / 100, received: received / 100, item_cost: itemCost / 100, extra_cost: extraCost / 100, profit: profit / 100, collector: settings.collector, parties: parties.map((party) => ({ ...party, advance: party.advance / 100, share: party.share / 100, balance: party.balance / 100 })), expenses: settings.expenses.map((expense) => ({ ...expense, amount: cents(expense.amount) / 100 })), items: items.map((item) => ({ ...item, payer: settings.payers[item.id] })) };
 }
 
-export function completedProfitItems(orders, fulfillments, settled, getCost) {
+export function completedProfitItems(orders, fulfillments, settled, getCost, getDeduction = () => 0) {
   return orders.filter((order) => order.status !== 'cancelled').flatMap((order) => (order.order_items || []).filter((item) => {
     const record = fulfillments.get(item.id);
     return record?.shipped_at && record?.completed_at && !settled.has(item.id);
-  }).map((item) => ({ id: item.id, order_id: order.id, order_number: order.order_number, recipient: order.recipient_name, name: item.product_name, quantity: Number(item.quantity), unit_price: Number(item.unit_price), unit_cost: getCost(item) })));
+  }).map((item) => ({ id: item.id, order_id: order.id, order_number: order.order_number, recipient: order.recipient_name, name: item.product_name, quantity: Number(item.quantity), unit_price: Number(item.unit_price), unit_cost: getCost(item), deduction: getDeduction(order, item) })));
 }
 
-export function createProfitSharing({ state, supabase, esc, money, getCost, render, toast, reload, bindBackdropClose }) {
+export function createProfitSharing({ state, supabase, esc, money, getCost, getDeduction = () => 0, render, toast, reload, bindBackdropClose }) {
   let ready = false, settlements = [], settled = new Set(), view = 'pending', draft = null, preview = null, busy = false;
-  const pending = () => completedProfitItems(state.orders, state.fulfillmentChecks, settled, getCost);
+  const pending = () => completedProfitItems(state.orders, state.fulfillmentChecks, settled, getCost, getDeduction);
   const freshDraft = () => ({ selected: new Set(), title: '', parties: [{ name: '我', ratio: 50 }, { name: '老婆', ratio: 50 }], collector: 0, received: '', receivedConfirmed: false, payers: {}, expenses: [] });
   const options = (selected) => draft.parties.map((party, index) => `<option value="${index}" ${index === selected ? 'selected' : ''}>${esc(party.name || `分潤人 ${index + 1}`)}</option>`).join('');
   const chosen = () => pending().filter((item) => draft?.selected.has(item.id));
-  const chosenAmount = () => chosen().reduce((sum, item) => sum + cents(item.unit_price * item.quantity), 0) / 100;
+  const chosenAmount = () => chosen().reduce((sum, item) => sum + cents(item.unit_price * item.quantity - item.deduction), 0) / 100;
   async function load() {
     if (!state.user || !['admin', 'owner'].includes(state.profile?.role)) { ready = false; settlements = []; settled = new Set(); draft = null; preview = null; return; }
     const { data, error } = await supabase.from('profit_share_settlements').select('id,completed_at,snapshot').order('completed_at', { ascending: false });

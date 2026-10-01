@@ -21,12 +21,15 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
     refunds.forEach((refund) => returned.set(refund.order_id, (returned.get(refund.order_id) || 0) + Number(refund.amount)));
     const groups = new Map();
     state.orders.forEach((order) => {
-      const amount = Number(order.deposit_amount || 0) - (returned.get(order.id) || 0);
-      if (amount <= 0) return;
+      const original = Number(order.deposit_amount || 0);
+      const deduction = Number(order.deposit_deduction || 0);
+      const amount = original - deduction - (returned.get(order.id) || 0);
+      if (original <= 0 || (amount <= 0 && (returned.get(order.id) || 0) > 0)) return;
       const key = recipientKey(order.recipient_name, order.phone);
-      if (!groups.has(key)) groups.set(key, { key, recipient: order.recipient_name, phone: order.phone || '', orders: [], total: 0 });
+      if (!groups.has(key)) groups.set(key, { key, recipient: order.recipient_name, phone: order.phone || '', orders: [], received: 0, deducted: 0, total: 0 });
       const group = groups.get(key);
-      group.orders.push({ id: order.id, number: order.order_number, amount }); group.total += amount;
+      group.orders.push({ id: order.id, number: order.order_number, amount, original, note: order.deposit_note || '', deduction });
+      group.received += original; group.deducted += deduction; group.total += amount;
     });
     return [...groups.values()];
   }
@@ -34,14 +37,14 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
   function panel() {
     const header = `<div class="section-head"><div><span class="eyebrow">DEPOSIT MANAGEMENT</span><h2>訂金管理</h2><p>按收件人彙整訂金來源與退款紀錄；訂金只作備註，不參與訂單或分潤計算。</p></div></div><div class="sub-tabs"><button data-deposit-view="received" class="${view === 'received' ? 'active' : ''}">已收訂金</button><button data-deposit-view="refunded" class="${view === 'refunded' ? 'active' : ''}">已退訂金</button></div>`;
     if (!ready || !state.depositReady) return `<section class="panel">${header}<div class="empty">請先在 Supabase 執行 order_deposit_upgrade.sql 啟用訂金管理。</div></section>`;
-    if (view === 'received') return `<section class="panel">${header}<div class="deposit-groups">${receivedGroups().map((group) => `<article class="deposit-group"><div><h3>${esc(group.recipient)}</h3>${group.phone ? `<small>${esc(group.phone)}</small>` : ''}<div class="deposit-sources">${group.orders.map((order) => `<p><span>${esc(order.number)}</span><strong>${money(order.amount)}</strong></p>`).join('')}</div></div><div class="deposit-group-total"><span>訂金來源 ${group.orders.length} 筆</span><strong>總訂金 ${money(group.total)}</strong><button class="btn btn-primary" data-deposit-refund="${esc(group.key)}">退訂</button></div></article>`).join('') || '<div class="empty">目前沒有未退的訂金</div>'}</div></section>`;
+    if (view === 'received') return `<section class="panel">${header}<div class="deposit-groups">${receivedGroups().map((group) => `<article class="deposit-group"><div><h3>${esc(group.recipient)}</h3>${group.phone ? `<small>${esc(group.phone)}</small>` : ''}<div class="deposit-sources">${group.orders.map((order) => `<div class="deposit-source"><p><span>${esc(order.number)}</span><strong>${money(order.original)}</strong></p>${order.amount !== order.original ? `<small>可退餘額 ${money(order.amount)}</small>` : ''}${order.note ? `<small>備註：${esc(order.note)}</small>` : ''}${order.deduction ? `<small>商品內扣 ${money(order.deduction)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><span>訂金來源 ${group.orders.length} 筆</span><strong>總訂金 ${money(group.received)}</strong>${group.deducted ? `<span>已內扣 ${money(group.deducted)}</span>` : ''}<strong>可退訂金 ${money(group.total)}</strong><button class="btn btn-primary" data-deposit-refund="${esc(group.key)}" ${group.total > 0 ? '' : 'disabled'}>退訂</button></div></article>`).join('') || '<div class="empty">目前沒有未退的訂金</div>'}</div></section>`;
     const batches = new Map();
     refunds.forEach((refund) => {
       if (!batches.has(refund.batch_id)) batches.set(refund.batch_id, { ...refund, orders: [], total: 0 });
       const batch = batches.get(refund.batch_id);
       batch.orders.push(refund); batch.total += Number(refund.amount);
     });
-    return `<section class="panel">${header}<div class="deposit-groups">${[...batches.values()].map((batch) => `<article class="deposit-group"><div><h3>${esc(batch.recipient_name)}</h3>${batch.phone ? `<small>${esc(batch.phone)}</small>` : ''}<div class="deposit-sources">${batch.orders.map((order) => `<p><span>${esc(order.order_number)}</span><strong>${money(order.amount)}</strong></p>`).join('')}</div></div><div class="deposit-group-total"><strong>已退 ${money(batch.total)}</strong><span>退款日期 ${esc(batch.refund_date)}</span><span>退款來源 ${esc(batch.refund_source)}</span>${batch.refund_account ? `<span>退款帳戶 ${esc(batch.refund_account)}</span>` : ''}</div></article>`).join('') || '<div class="empty">目前沒有退款紀錄</div>'}</div></section>`;
+    return `<section class="panel">${header}<div class="deposit-groups">${[...batches.values()].map((batch) => `<article class="deposit-group"><div><h3>${esc(batch.recipient_name)}</h3>${batch.phone ? `<small>${esc(batch.phone)}</small>` : ''}<div class="deposit-sources">${batch.orders.map((order) => `<div class="deposit-source"><p><span>${esc(order.order_number)}</span><strong>${money(order.amount)}</strong></p>${state.orders.find((entry) => entry.id === order.order_id)?.deposit_note ? `<small>備註：${esc(state.orders.find((entry) => entry.id === order.order_id).deposit_note)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><strong>已退 ${money(batch.total)}</strong><span>退款日期 ${esc(batch.refund_date)}</span><span>退款來源 ${esc(batch.refund_source)}</span>${batch.refund_account ? `<span>退款帳戶 ${esc(batch.refund_account)}</span>` : ''}</div></article>`).join('') || '<div class="empty">目前沒有退款紀錄</div>'}</div></section>`;
   }
 
   function modal() {

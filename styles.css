@@ -120,8 +120,12 @@ h1 em { color:var(--rose-deep); font-weight:700; }
 .deposit-section { margin:14px 0; padding:12px 14px; border:1px solid var(--line); border-radius:14px; background:#fff5f9; }
 .deposit-section > .inline-check { font-size:14px!important; color:var(--ink); margin:0; }
 .deposit-field[hidden] { display:none; }
+.deposit-details[hidden],.deposit-deduction-field[hidden] { display:none; }
 .deposit-field { margin-bottom:0; }
-.order-deposit-summary { display:block; margin-top:5px; font-size:12px; color:var(--rose-deep); white-space:nowrap; }
+.deposit-deduct-check { margin:12px 0 4px; font-size:13px!important; color:var(--ink); }
+.deposit-details > small { display:block; color:var(--muted); font-size:11px; margin-top:8px; }
+.deposit-details > strong { display:block; margin-top:10px; }
+.order-deposit-summary { display:block; margin-top:5px; font-size:12px; color:var(--rose-deep); overflow-wrap:anywhere; }
 input,select,textarea { width:100%; border:1px solid var(--line); border-radius:13px; padding:11px 12px; background:white; color:var(--ink); outline:none; }
 input:focus,select:focus,textarea:focus { border-color:var(--rose); box-shadow:0 0 0 4px #df7e9d20; }
 textarea { resize:vertical; }
@@ -197,6 +201,8 @@ textarea { resize:vertical; }
 .deposit-group small { color:var(--muted); }
 .deposit-sources { margin-top:12px; }
 .deposit-sources p { display:flex; justify-content:space-between; gap:18px; margin:7px 0; font-size:13px; }
+.deposit-source + .deposit-source { border-top:1px dashed var(--line); margin-top:8px; padding-top:8px; }
+.deposit-source small { display:block; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
 .deposit-group-total { display:grid; align-content:center; justify-items:start; gap:8px; }
 .deposit-group-total span { font-size:13px; color:var(--muted); }
 .deposit-group-total strong { white-space:nowrap; }
@@ -303,6 +309,9 @@ body.modal-open .pwa-install { display:none; }
 .shipment-recipient-notes label > span { color:var(--rose-deep); font-size:10px; font-weight:800; }
 .shipment-recipient-notes textarea { width:100%; min-width:170px; padding:8px; resize:vertical; border-radius:9px; background:white; font:inherit; font-size:12px; }
 .shipment-recipient-notes .btn { justify-self:start; padding:7px 10px; font-size:11px; }
+.shipment-deposit-info { display:grid; gap:4px; min-width:190px; margin-top:8px; padding:9px; border:1px solid var(--line); border-radius:11px; background:#fff8e8; overflow-wrap:anywhere; }
+.shipment-deposit-info strong { font-size:11px; color:var(--ink); }
+.shipment-deposit-info small { font-size:11px; color:var(--muted); }
 .shipment-items { display:grid; gap:8px; min-width:230px; }
 .shipment-item { display:grid; grid-template-columns:42px minmax(0,1fr); align-items:center; gap:9px; padding:5px; border:1px solid var(--line); border-radius:12px; background:#fffafd; }
 .shipment-item.selectable { grid-template-columns:22px 42px minmax(0,1fr); }
