@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createProfitSharing } from './profit-sharing.js?v=2';
+import { createProfitSharing } from './profit-sharing.js?v=3';
 import { createDepositManagement } from './deposit-management.js?v=4';
 
 const supabase = createClient(
@@ -1654,7 +1654,7 @@ async function statementSnapshotCanvas(recipient) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   const depositDetails = shipmentOrderGroups(recipient).filter((group) => group.deposit_amount > 0).flatMap((group) => [
-    `${group.order_number} 訂金 ${money(group.deposit_amount)}${group.deduction ? `・本張內扣 ${money(group.deduction)}` : ''}`,
+    `訂金 ${money(group.deposit_amount)}${group.deduction ? `・本張內扣 ${money(group.deduction)}` : ''}`,
     ...(group.deposit_note ? [`訂金備註：${group.deposit_note}`] : []),
   ]);
   ctx.font = '16px sans-serif';
