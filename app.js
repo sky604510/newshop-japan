@@ -287,16 +287,16 @@ function marketPrice(market) {
 function marketCard(market, index) {
   const items = market.products.filter((item) => item.is_active);
   const cover = market.image_url;
-  const art = cover ? `<img src="${esc(cover)}" alt="${esc(market.name)}" loading="${index < 2 ? 'eager' : 'lazy'}" decoding="async" />` : `<span class="empty-image" aria-hidden="true"></span>`;
+  const art = cover ? `<img src="${esc(cover)}" alt="${esc(market.name)}" />` : `<span class="empty-image" aria-hidden="true"></span>`;
   const closed = isClosed(market); const soldOut = !items.some((item) => Number(item.stock) > 0);
   const unavailable = soldOut || closed;
-  return `<article class="market-card reveal" style="--delay:${Math.min(index * 70, 280)}ms"><button class="market-cover" data-open-market="${market.id}" aria-label="查看 ${esc(market.name)}">${art}<span class="market-arrow">↗</span></button><div class="market-copy"><div class="market-meta"><span class="market-edition">COLLECTION ${String(index + 1).padStart(2, '0')} · ${items.length} 個品項</span><span>${closed ? '已截止' : soldOut ? '已售完' : '開放中'}</span></div><h3>${esc(market.name)}</h3><p>${esc(market.description || '精選限定商品。')}</p>${market.closes_at ? `<div class="deadline">收單至 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}</div>` : ''}<div class="market-bottom"><strong>${marketPrice(market)}</strong><button class="text-link" data-open-market="${market.id}">${unavailable ? (closed ? '已截止・查看商品' : '無庫存・查看商品') : '進入賣場 →'}</button></div></div></article>`;
+  return `<article class="market-card reveal" style="--delay:${Math.min(index * 70, 280)}ms"><button class="market-cover" data-open-market="${market.id}" aria-label="查看 ${esc(market.name)}">${art}<span class="market-arrow">↗</span></button><div class="market-copy"><div class="market-meta"><span>${items.length} 個品項</span><span>${closed ? '已截止' : soldOut ? '已售完' : '開放中'}</span></div><h3>${esc(market.name)}</h3><p>${esc(market.description || '精選限定商品。')}</p>${market.closes_at ? `<div class="deadline">收單至 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}</div>` : ''}<div class="market-bottom"><strong>${marketPrice(market)}</strong><button class="text-link" data-open-market="${market.id}">${unavailable ? (closed ? '已截止・查看商品' : '無庫存・查看商品') : '進入賣場 →'}</button></div></div></article>`;
 }
 
 function shop() {
   const markets = state.markets.filter((market) => market.is_active);
   const cards = state.loading ? `<div class="empty">正在同步連線賣場…</div>` : markets.length ? markets.map(marketCard).join('') : `<div class="empty">目前沒有上架賣場</div>`;
-  return `<main class="storefront"><section class="collection-intro" aria-labelledby="collection-title"><div class="collection-kicker"><span>NEWSHOP / JAPAN SELECT</span><span>喜歡的事物，值得被收藏。</span></div><div class="collection-heading"><div><h1 id="collection-title">把喜歡，<br/><em>帶回日常。</em></h1><p>連線選物與少量預購。從每一次心動，<br/>到你的日常收藏。</p></div><div class="collection-aside"><span class="collection-seal" aria-hidden="true">FROM JAPAN<br/><b>↗</b>WITH LOVE</span><a href="#markets" class="collection-cta">探索本期賣場 <span aria-hidden="true">↓</span></a></div></div><div class="collection-index"><span>THE COLLECTIONS</span><span>${state.loading ? '同步中' : `${String(markets.length).padStart(2, '0')} 個上架賣場`} / 精選連線</span></div></section><section id="markets" class="catalog-first" aria-label="精選賣場"><div class="markets-grid">${cards}</div></section><section id="guide" class="guide compact-guide"><div class="guide-title"><span>HOW TO ORDER</span><h2>簡單三步驟</h2></div><div class="guide-grid"><article><span>01</span><h3>進入賣場</h3><p>查看各賣場的品項與收單期限。</p></article><article><span>02</span><h3>加入購物車</h3><p>選擇品項和數量，售完會直接顯示無庫存。</p></article><article><span>03</span><h3>登入送單</h3><p>送出後可隨時查詢訂單進度。</p></article></div></section></main>`;
+  return `<main><section id="markets" class="catalog-first"><div class="markets-grid">${cards}</div></section><section id="guide" class="guide compact-guide"><div class="guide-title"><span>HOW TO ORDER</span><h2>簡單三步驟</h2></div><div class="guide-grid"><article><span>01</span><h3>進入賣場</h3><p>查看各賣場的品項與收單期限。</p></article><article><span>02</span><h3>加入購物車</h3><p>選擇品項和數量，售完會直接顯示無庫存。</p></article><article><span>03</span><h3>登入送單</h3><p>送出後可隨時查詢訂單進度。</p></article></div></section></main>`;
 }
 
 function orderRow(order) {
@@ -714,7 +714,7 @@ function render() {
   if (suppressRerenderMotion) document.body.classList.add('suppress-modal-motion');
   const content = state.view === 'shop' ? shop() : state.view === 'orders' ? ordersView() : adminView();
 
-  document.querySelector('#app').innerHTML = `<a class="skip-link" href="#main-content">跳至主要內容</a><div class="shell">${nav()}${content.replace('<main', '<main id="main-content" tabindex="-1"')}${footer()}</div>${state.modal ? modal() : ''}${state.previewImage ? imagePreviewModal() : ''}`;
+  document.querySelector('#app').innerHTML = `<div class="shell">${nav()}${content}${footer()}</div>${state.modal ? modal() : ''}${state.previewImage ? imagePreviewModal() : ''}`;
   document.body.classList.toggle('modal-open', Boolean(state.modal || state.previewImage));
   bind();
   const nextModal = document.querySelector('.modal');

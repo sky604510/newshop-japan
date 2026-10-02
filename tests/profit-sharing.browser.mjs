@@ -8,7 +8,7 @@ const { chromium } = createRequire(import.meta.url)('playwright');
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const output = await mkdtemp(join(tmpdir(), 'newshop-profit-test-'));
 const source = await readFile(new URL('../profit-sharing.js', import.meta.url), 'utf8');
-const css = (await readFile(new URL('../styles.css', import.meta.url), 'utf8')).replace(/^@import[^\r\n]+\r?\n/, '') + await readFile(new URL('../design.css', import.meta.url), 'utf8');
+const css = (await readFile(new URL('../styles.css', import.meta.url), 'utf8')).replace(/^@import[^\r\n]+\r?\n/, '');
 try {
   for (const width of [1366, 390]) {
     const page = await browser.newPage({ viewport: { width, height: 844 } });
