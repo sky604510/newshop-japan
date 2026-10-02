@@ -25,6 +25,7 @@ try {
         order_item_fulfillments:[{order_item_id:'b',shipped_at:'2026-10-01',completed_at:'2026-10-01'}],
         profit_share_settlements:[],customers:[],
       };
+      tables.orders.push({id:'o2',order_number:'NS-SECOND',recipient_name:'另一收件人',phone:'',status:'confirmed',total_amount:2800,order_items:[{id:'a2',product_id:'p1',market_id:'m1',product_name:'已採購未發貨商品',unit_price:1400,unit_cost:800,quantity:2}]});
       const createClient=()=>({auth:{onAuthStateChange(){}},from:table=>{
         const query={select(){return query;},order(){return query;},then(resolve){resolve({data:structuredClone(tables[table]||[]),error:null});},async upsert(row){const found=tables[table].find(entry=>entry.product_id===row.product_id);Object.assign(found,row);return {error:null};}};
         return query;
@@ -42,13 +43,31 @@ try {
     await page.locator('[data-admin-tab="summary"]').click();
     await page.locator('[data-procurement-history="history"]').click();
     assert.equal(await page.locator('[data-procurement-product="p1"]').count(),1);
+    const historyRows = await page.locator('[data-procurement-product="p1"]').evaluate(el=>[...el.closest('tr').querySelectorAll('td')].slice(1).map(td=>td.textContent));
     await page.locator('[data-procurement-history="profit"]').click();
-    await page.locator('[data-profit-item="a"]').waitFor();
-    assert.equal(await page.locator('[data-profit-item="b"]').count(),0);
+    await page.locator('[data-profit-product="p1"]').waitFor();
+    const profitRows = await page.locator('[data-profit-product="p1"]').evaluate(el=>[...el.closest('tr').querySelectorAll('td')].slice(1).map(td=>td.textContent));
+    assert.deepEqual(profitRows,historyRows,'Market/product statistics match procurement history');
+    assert.equal(await page.locator('[data-profit-product="p1"]').count(),1,'Same product from two orders appears as one row');
+    assert.equal(await page.locator('.profit-market-list [data-profit-order]').count(),0);
+    await page.screenshot({path:join(output,`market-selection-${width}.png`),fullPage:true});
+    assert.equal(await page.locator('[data-profit-product="p2"]').count(),0);
     assert.match(await page.locator('.procurement-profit-content').textContent(),/採購歷史/);
-    await page.locator('[data-profit-item="a"]').check();
+    await page.locator('[data-profit-product="p1"]').check();
+    assert.match(await page.locator('[data-profit-selection]').textContent(), /1 個商品・3 件/);
+    assert.equal(await page.locator('[data-profit-market="m1"]').isChecked(),true);
+    await page.locator('[data-profit-market="m1"]').uncheck();
+    assert.equal(await page.locator('[data-profit-next]').isDisabled(),true);
+    await page.locator('[data-profit-market="m1"]').check();
+    assert.equal(await page.locator('[data-profit-product="p1"]').isChecked(),true);
     await page.locator('[data-profit-next]').click();
     await page.locator('[data-profit-title]').fill('保留草稿');
+    await page.locator('[data-profit-confirmed]').check();
+    await page.locator('[data-profit-calculate]').click();
+    assert.equal(await page.locator('.profit-result-items [data-profit-product-row="p1"]').count(),1);
+    assert.match(await page.locator('.profit-totals').textContent(),/商品成本NT\$ 2,600/);
+    assert.match(await page.locator('.profit-totals').textContent(),/可分利潤NT\$ 1,700/);
+    await page.locator('[data-profit-back="settings"]').click();
     await page.locator('[data-procurement-history="history"]').click();
     await page.locator('[data-procurement-history="profit"]').click();
     assert.equal(await page.locator('[data-profit-title]').inputValue(),'保留草稿');
@@ -59,7 +78,7 @@ try {
     await page.locator('[data-procurement-product="p1"]').click();
     await page.waitForFunction(()=>document.querySelector('[data-procurement-product="p1"]')===null);
     await page.locator('[data-procurement-history="profit"]').click();
-    assert.equal(await page.locator('[data-profit-item]').count(),0,'Undo purchase removes item from pending sharing');
+    assert.equal(await page.locator('[data-profit-product]').count(),0,'Undo purchase removes item from pending sharing');
     assert.deepEqual(errors,[]);
     console.log(`PASS ${width}px: merged navigation, purchased-only source, no shipment dependency, draft preserved, purchase undo`);
     await page.close();

@@ -455,6 +455,10 @@ body.modal-open .pwa-install { display:none; }
 .profit-history p { margin:6px 0; font-size:13px; }
 .profit-warning { color:var(--rose-deep); }
 .procurement-profit-content > .panel,.admin-page .procurement-profit-content > .panel { padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
+.profit-market-list { margin-top:20px; }
+.profit-market-list .summary-head h3 { display:flex; align-items:center; gap:10px; }
+.profit-market-list input[type=checkbox] { width:18px; height:18px; accent-color:var(--rose-deep); flex:none; }
+.profit-market-table select { min-width:110px; }
 .profit-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; list-style:none; padding:0; margin:24px 0; }
 .profit-steps li { display:flex; align-items:center; gap:9px; padding:12px; border:1px solid var(--line); border-radius:12px; color:var(--muted); font-size:13px; }
 .profit-steps li.active { background:var(--blush); color:var(--rose-deep); border-color:var(--rose-deep); font-weight:800; }

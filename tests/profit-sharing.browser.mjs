@@ -34,11 +34,11 @@ try {
       controller = createProfitSharing({ state, supabase, esc, money: (value) => `NT$ ${Number(value).toLocaleString('zh-TW')}`, getCost: (item) => item.unit_cost, render, toast: (message) => { window.lastProfitToast = message; }, reload: async () => {}, bindBackdropClose: () => {} });
       await controller.load(); render(); window.profitFixture = { controller, state, render };
     }, source);
-    assert.equal(await page.locator('[data-profit-item]').count(), 1);
+    assert.equal(await page.locator('[data-profit-product]').count(), 1);
     assert.equal(await page.locator('.profit-item-thumb img').count(), 1);
     assert.equal(await page.locator('[data-profit-title]').count(), 0, 'First step shows selection only');
     assert.ok(await page.locator('[data-profit-next]').isDisabled());
-    await page.locator('[data-profit-order]').check();
+    await page.locator('[data-profit-market]').check();
     await page.screenshot({ path:join(output, `selection-${width}.png`) });
     await page.locator('[data-profit-next]').click();
     assert.equal(await page.locator('[data-profit-party]').count(), 1);
@@ -55,7 +55,7 @@ try {
     await page.locator('[data-profit-name]').nth(0).fill('我');
     await page.locator('[data-profit-name]').nth(1).fill('老婆');
     await page.locator('[data-profit-back="select"]').click();
-    assert.ok(await page.locator('[data-profit-order]').isChecked(), 'Back retains selection');
+    assert.ok(await page.locator('[data-profit-market]').isChecked(), 'Back retains selection');
     await page.locator('[data-profit-next]').click();
     assert.equal(await page.locator('[data-profit-title]').inputValue(), '測試分潤批次');
     await page.locator('[data-profit-collector]').selectOption('1');
@@ -84,7 +84,7 @@ try {
     await page.locator('[data-profit-collector]').selectOption('1');
     await page.locator('[data-profit-calculate]').click();
     assert.match(await page.locator('.profit-transfer').textContent(), /老婆 應轉給 我 NT\$ 1,200/);
-    assert.equal(await page.locator('.profit-result-item img').count(), 1);
+    assert.equal(await page.locator('.profit-result-items .profit-item-thumb img').count(), 1);
     assert.equal(await page.locator('.modal-backdrop').count(), 0, 'Calculation moves to result page, not a popup');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), 'Result page fits viewport');
 
@@ -93,11 +93,11 @@ try {
     await page.locator('[data-profit-history]').waitFor();
     assert.match(await page.locator('.profit-history').textContent(), /分潤時間/);
     await page.locator('[data-profit-history]').click();
-    assert.equal(await page.locator('.profit-result-item img').count(), 1);
+    assert.equal(await page.locator('.profit-result-items .profit-item-thumb img').count(), 1);
     assert.match(await page.locator('.profit-transfer').textContent(), /1,200/);
     await page.locator('[data-profit-close]').click();
     await page.locator('[data-profit-view="pending"]').click();
-    assert.equal(await page.locator('[data-profit-item]').count(), 0);
+    assert.equal(await page.locator('[data-profit-product]').count(), 0);
     const warning = await page.evaluate(() => window.profitFixture.controller.restoreWarning(['a']));
     assert.equal(warning.count, 1);
     assert.deepEqual(errors, []);
