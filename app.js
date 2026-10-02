@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createProfitSharing } from './profit-sharing.js?v=4';
+import { createProfitSharing } from './profit-sharing.js?v=5';
 import { createDepositManagement } from './deposit-management.js?v=4';
 
 const supabase = createClient(
@@ -18,7 +18,7 @@ const state = {
   marketDraft: null, editingMarketId: null, orderDraft: null, editingOrderId: null, lastOrder: null,
   customerDraft: null, checkoutMode: 'general',
   checkoutDraft: JSON.parse(localStorage.getItem('newshop_checkout_draft') || '{}'),
-  authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, shipmentView: 'pending',
+  authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, procurementProfit: false, shipmentView: 'pending',
   procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), shipmentRecipientSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true,
   operationsReady: true, costReady: true, pricingReady: true, adminOpsReady: true, orderEditorReady: true, sortingReady: true,
   fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, orderCostOverrideReady: true, shipmentBusy: false, depositReady: true, depositDetailsReady: true,
@@ -70,7 +70,7 @@ function friendlyError(error) {
 }
 
 const profitSharing = createProfitSharing({ state, supabase, esc, money, getCost: currentOrderItemCost, getDeduction: (order, item) => orderDeductionShares(order).get(item.id) || 0, render, toast: renderToast, bindBackdropClose,
-  reload: () => Promise.all([loadOrders(), loadFulfillmentChecks(), loadMarkets()]),
+  reload: () => Promise.all([loadOrders(), loadFulfillmentChecks(), loadMarkets(), loadProcurementChecks()]),
 });
 const depositManagement = createDepositManagement({ state, supabase, esc, money, render, toast: renderToast, bindBackdropClose });
 
@@ -521,12 +521,13 @@ function adminView() {
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}${state.fulfillmentReady && !state.shipmentCompletionReady ? `<div class="setup-notice">請執行 <strong>shipment_completion_upgrade.sql</strong>，才能使用已完成及還原功能；原有發貨歷史仍保留在已發貨。</div>` : ''}`;
   const orderCostNotice = (state.orderCostOverrideReady ? '' : '<div class="setup-notice">請執行 <strong>order_cost_override_upgrade.sql</strong>，才能保存訂單品項的手動成本。</div>') + (state.depositReady ? '' : '<div class="setup-notice">請執行 <strong>order_deposit_upgrade.sql</strong> 啟用訂金功能；既有訂單與結帳仍可使用。</div>') + (state.depositReady && !state.depositDetailsReady ? '<div class="setup-notice">請執行 <strong>order_deposit_details_upgrade.sql</strong>，啟用訂金備註與商品內扣。</div>' : '');
   const orderPanel = `<section class="panel order-panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史清單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整訂單 →</div><div class="table-wrap order-table-wrap"><table class="admin-table order-management-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>訂金備註</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
-  const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div><div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div></section>`;
+  const procurementTabs = `<div class="sub-tabs procurement-tabs"><button class="${!state.procurementProfit && !state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${!state.procurementProfit && state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button><button class="${state.procurementProfit ? 'active' : ''}" data-procurement-history="profit">分潤</button></div>`;
+  const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE & PROFIT SHARING</span><h2>各賣場採購統計</h2><p>${state.procurementProfit ? '從採購歷史選取訂單品項，確認入帳後進行分潤。' : '勾選完成後會移入採購歷史，可隨時取消勾選移回。'}</p></div>${state.procurementProfit ? '' : '<button class="btn btn-primary" data-action="export">下載 Excel 報表</button>'}</div>${procurementTabs}${state.procurementProfit ? `<div class="procurement-profit-content">${profitSharing.panel()}</div>` : `<div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div>`}</section>`;
   const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><div class="shipment-header-actions">${state.shipmentView === 'pending' ? `<button class="btn btn-primary shipment-send" data-ship-selected ${shipmentSelectedCount && state.fulfillmentReady && !state.shipmentBusy ? '' : 'disabled'}>${state.shipmentBusy ? '發貨中…' : `發貨（${shipmentSelectedCount}）`}</button>` : ''}<button class="btn btn-primary" data-action="export-shipment">下載 Excel 報表</button></div></div><div class="sub-tabs"><button class="${state.shipmentView === 'pending' ? 'active' : ''}" data-shipment-view="pending">待發貨</button><button class="${state.shipmentView === 'shipped' ? 'active' : ''}" data-shipment-view="shipped">已發貨</button><button class="${state.shipmentView === 'completed' ? 'active' : ''}" data-shipment-view="completed" ${state.shipmentCompletionReady ? '' : 'disabled'}>已完成</button></div>${state.shipmentView === 'shipped' ? `<div class="shipment-bulk-actions"><button class="btn btn-primary" data-complete-selected ${state.shipmentRecipientSelection.size && state.shipmentCompletionReady ? '' : 'disabled'}>將選取的收件人移至已完成${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}</button></div>` : ''}${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th>${state.shipmentView === 'pending' ? '' : `<th>${state.shipmentView === 'shipped' ? '發貨日期' : '發貨日期／操作'}</th>`}</tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentView === 'pending' ? '目前沒有待發貨商品' : state.shipmentView === 'shipped' ? '目前沒有已發貨商品' : '目前沒有已完成商品'}</div>`}</section>`;
   const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>只有收件人為必填，信箱與電話皆可留空。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>信箱（選填）</th><th>電話（選填）</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
   const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>拖曳調整同一區內的順序；可同時置頂多個賣場。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table market-sort-table"><thead><tr><th>排序</th><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody id="market-sort-list">${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
-  const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, profits: state.adminTab === 'profits' ? profitSharing.panel() : '', deposits: state.adminTab === 'deposits' ? depositManagement.panel() : '', customers: customerPanel, markets: marketPanel };
-  return `<main class="admin-page">${migrationNotice}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購統計</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'profits' ? 'active' : ''}" data-admin-tab="profits">分潤清單</button><button class="${state.adminTab === 'deposits' ? 'active' : ''}" data-admin-tab="deposits">訂金管理</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
+  const panels = { orders: orderPanel, summary: summaryPanel, shipments: shipmentPanel, deposits: state.adminTab === 'deposits' ? depositManagement.panel() : '', customers: customerPanel, markets: marketPanel };
+  return `<main class="admin-page">${migrationNotice}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購與分潤</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'deposits' ? 'active' : ''}" data-admin-tab="deposits">訂金管理</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
 }
 
 function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
@@ -1864,14 +1865,14 @@ function bind() {
   document.querySelectorAll('[data-shipment-snapshot]').forEach((button) => button.addEventListener('click', () => openStatementSnapshot(button.dataset.shipmentSnapshot, button)));
   document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', async () => {
     const nextTab = button.dataset.adminTab;
-    if (state.adminTab === 'profits') profitSharing.capture();
-    if (['profits', 'shipments', 'deposits'].includes(nextTab)) {
+    if (state.adminTab === 'summary' && state.procurementProfit) profitSharing.capture();
+    if (['shipments', 'deposits'].includes(nextTab)) {
       try { await Promise.all([loadOrders(), loadFulfillmentChecks(), profitSharing.load(), depositManagement.load()]); await loadProductCosts(); }
       catch (error) { renderToast(friendlyError(error)); return; }
     }
     if (nextTab === 'summary') {
       try {
-        await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks()]);
+        await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks(), profitSharing.load()]);
         await loadProductCosts();
       } catch (error) { renderToast(friendlyError(error)); }
     }
@@ -1880,7 +1881,17 @@ function bind() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }));
   document.querySelectorAll('[data-order-history]').forEach((button) => button.addEventListener('click', () => { state.adminOrderHistory = button.dataset.orderHistory === 'history'; render(); }));
-  document.querySelectorAll('[data-procurement-history]').forEach((button) => button.addEventListener('click', () => { state.procurementHistory = button.dataset.procurementHistory === 'history'; render(); }));
+  document.querySelectorAll('[data-procurement-history]').forEach((button) => button.addEventListener('click', async () => {
+    profitSharing.capture();
+    const target = button.dataset.procurementHistory;
+    if (target === 'profit') {
+      try { await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks(), profitSharing.load()]); await loadProductCosts(); }
+      catch (error) { renderToast(friendlyError(error)); return; }
+    }
+    state.procurementProfit = target === 'profit';
+    if (!state.procurementProfit) state.procurementHistory = target === 'history';
+    render();
+  }));
   document.querySelectorAll('[data-procurement-product]').forEach((input) => input.addEventListener('change', () => toggleProcurement(input.dataset.procurementProduct, input.checked)));
   document.querySelectorAll('[data-order-item-purchase]').forEach((input) => input.addEventListener('change', () => toggleOrderItemPurchase(input.dataset.orderItemPurchase, input.checked)));
   document.querySelectorAll('[data-shipment-view]').forEach((button) => button.addEventListener('click', () => { state.shipmentView = button.dataset.shipmentView; state.shipmentSelection.clear(); state.shipmentRecipientSelection.clear(); render(); }));
@@ -1975,11 +1986,12 @@ let procurementPolling = false;
 window.setInterval(async () => {
   if (procurementPolling || document.hidden || state.view !== 'admin' || state.adminTab !== 'summary' || state.modal) return;
   procurementPolling = true;
+  profitSharing.capture();
   const before = JSON.stringify([state.orders, state.markets, [...state.procurementChecks]]);
   try {
     await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks()]);
     await loadProductCosts();
-    if (state.view === 'admin' && state.adminTab === 'summary' && before !== JSON.stringify([state.orders, state.markets, [...state.procurementChecks]])) render();
+    if (state.view === 'admin' && state.adminTab === 'summary' && before !== JSON.stringify([state.orders, state.markets, [...state.procurementChecks]])) { profitSharing.capture(); await profitSharing.load(); render(); }
   } catch (_) { /* The next poll or a tab switch will retry. */ }
   finally { procurementPolling = false; }
 }, 30000);

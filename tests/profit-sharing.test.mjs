@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateProfitShare, completedProfitItems, createProfitSharing, equalProfitRatios } from '../profit-sharing.js';
+import { calculateProfitShare, procuredProfitItems, createProfitSharing, equalProfitRatios } from '../profit-sharing.js';
 
 const parties = [{ name: '我', ratio: 50 }, { name: '老婆', ratio: 50 }];
 const item = { id: 'a', quantity: 1, unit_price: 1500, unit_cost: 1000 };
@@ -52,20 +52,16 @@ test('拒絕未入帳、無效比例與無效額外成本', () => {
   assert.throws(() => calculateProfitShare([item], { ...settings, parties: [{ name: '我', ratio: 30 }, { name: '老婆', ratio: 30 }] }));
   assert.throws(() => calculateProfitShare([item], { ...settings, expenses: [{ description: '集運', amount: -1, payer: 0 }] }));
 });
-test('來源只限已完成：排除待發貨、已發貨、已分潤、取消與不一致狀態', () => {
-  const orders = [{ id: 'order', status: 'confirmed', order_items: ['pending', 'shipped', 'complete', 'settled', 'inconsistent'].map((id) => ({ ...item, id })) }, { status: 'cancelled', order_items: [{ ...item, id: 'cancelled' }] }];
-  const fulfillments = new Map([
-    ['shipped', { shipped_at: '2026-09-30' }],
-    ...['complete', 'settled', 'cancelled'].map((id) => [id, { shipped_at: '2026-09-30', completed_at: '2026-09-30T00:00:00Z' }]),
-    ['inconsistent', { completed_at: '2026-09-30T00:00:00Z' }],
-  ]);
-  assert.deepEqual(completedProfitItems(orders, fulfillments, new Set(['settled']), (entry) => entry.unit_cost).map((entry) => entry.id), ['complete']);
-  fulfillments.set('complete', { shipped_at: '2026-09-30', completed_at: null });
-  assert.equal(completedProfitItems(orders, fulfillments, new Set(['settled']), (entry) => entry.unit_cost).length, 0);
+test('來源只限採購歷史：未發貨可分潤、未採購和已分潤均排除', () => {
+  const orders = [{ id:'order',status:'confirmed',order_items:['pending','bought','settled','bought-again','removed'].map((id)=>({...item,id,product_id:id==='bought-again'?'bought':id})) },{status:'cancelled',order_items:[{...item,id:'cancelled',product_id:'bought'}]}];
+  const checks = new Map([['pending',{is_purchased:false}],['bought',{is_purchased:true}],['settled',{is_purchased:true}]]);
+  assert.deepEqual(procuredProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).map(entry=>entry.id),['bought','bought-again']);
+  checks.set('bought',{is_purchased:false});
+  assert.equal(procuredProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).length,0);
 });
 test('還原提醒重新讀取已分潤紀錄，不能因本地資料過期漏掉提醒', async () => {
   let records = [];
-  const controller = createProfitSharing({ state: { user: { id: 'admin' }, profile: { role: 'owner' }, orders: [], fulfillmentChecks: new Map() }, supabase: { from: () => ({ select: () => ({ order: async () => ({ data: records }) }) }) }, esc: String, money: String, getCost: () => 0 });
+  const controller = createProfitSharing({ state: { user: { id: 'admin' }, profile: { role: 'owner' }, orders: [], procurementChecks: new Map() }, supabase: { from: () => ({ select: () => ({ order: async () => ({ data: records }) }) }) }, esc: String, money: String, getCost: () => 0 });
   await controller.load();
   records = [{ id: 'settlement', snapshot: { items: [{ id: 'a' }] } }];
   const warning = await controller.restoreWarning(['a', 'b']);

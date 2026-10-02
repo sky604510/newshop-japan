@@ -21,9 +21,9 @@ try {
       const state = { products: [{id:'product1',image_url:'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48"%3E%3Crect width="48" height="48" fill="pink"/%3E%3C/svg%3E'}], user: { id: 'admin' }, profile: { role: 'owner' }, orders: [
         { id: 'order1', order_number: 'NS-TEST-1', recipient_name: '測試收件人', status: 'confirmed', order_items: [{ id: 'a', product_id:'product1', product_name: '測試商品 <限量款>', quantity: 1, unit_price: 1500, unit_cost: 1000 }, { id: 'b', product_name: '待發貨不能分潤', quantity: 1, unit_price: 500, unit_cost: 100 }] },
         { id: 'order2', order_number: 'NS-TEST-2', status: 'confirmed', order_items: [{ id: 'c', product_name: '已發貨不能分潤', quantity: 1, unit_price: 500, unit_cost: 100 }] },
-      ], fulfillmentChecks: new Map([['a', { shipped_at: '2026-09-30', completed_at: '2026-09-30T00:00:00Z' }], ['c', { shipped_at: '2026-09-30' }]]) };
+      ], procurementChecks: new Map([['product1',{is_purchased:true}]]), fulfillmentChecks: new Map([['c', { shipped_at: '2026-09-30' }]]) };
       const supabase = { from: () => ({ select: () => ({ order: async () => ({ data: structuredClone(records) }) }) }), rpc: async (name, args) => {
-        if (name !== 'admin_complete_profit_share_v2' || args.p_item_ids.join() !== 'a') throw new Error('Incorrect settlement request');
+        if (name !== 'admin_complete_procurement_profit_share' || args.p_item_ids.join() !== 'a') throw new Error('Incorrect settlement request');
         window.lastProfitRequest = args;
         const snapshot = calculateProfitShare(args.p_settings.expected_items, args.p_settings); snapshot.title = args.p_settings.title;
         const data = { id: 'saved', completed_at: new Date().toISOString(), snapshot }; records.push(data); return { data: innerWidth < 600 ? [data] : data };
