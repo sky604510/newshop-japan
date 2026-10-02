@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createProfitSharing } from './profit-sharing.js?v=6';
+import { createProfitSharing } from './profit-sharing.js?v=7';
 import { createDepositManagement } from './deposit-management.js?v=4';
 
 const supabase = createClient(
@@ -688,7 +688,7 @@ function modal() {
   if (state.modal === 'order-editor') return orderEditorModal();
   if (state.modal === 'market-editor') return marketEditorModal();
   if (state.modal === 'customer-editor') return customerEditorModal();
-  if (state.modal === 'profit-result') return profitSharing.modal();
+  if (['profit-result', 'profit-zero-cost'].includes(state.modal)) return profitSharing.modal();
   if (state.modal === 'deposit-refund') return depositManagement.modal();
   return '';
 }
@@ -1203,7 +1203,7 @@ function closeOrderEditor() {
 }
 
 function closeActiveModal() {
-  if (state.modal === 'profit-result') { profitSharing.close(); return; }
+  if (['profit-result', 'profit-zero-cost'].includes(state.modal)) { profitSharing.close(); return; }
   if (state.modal === 'deposit-refund') { depositManagement.close(); return; }
   if (state.modal === 'cart') { continueShopping(); return; }
   if (state.modal === 'checkout') persistCheckoutDraft();
@@ -1832,7 +1832,7 @@ function bind() {
   document.querySelector('#order-delivery')?.addEventListener('change', syncOrderDraftFromForm);
   bindModalScroll();
   document.querySelectorAll('[data-batch-item]').forEach((button) => button.addEventListener('click', () => changeBatchQuantity(button.dataset.batchItem, Number(button.dataset.batchDelta))));
-  if (state.modal !== 'profit-result') bindBackdropClose(document.querySelector('.modal-backdrop'), closeActiveModal);
+  if (!['profit-result', 'profit-zero-cost'].includes(state.modal)) bindBackdropClose(document.querySelector('.modal-backdrop'), closeActiveModal);
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => { state.view = button.dataset.view; if (state.view === 'admin') state.adminTab = 'markets'; if ((state.view === 'orders' || state.view === 'admin') && state.user) { await Promise.all([loadOrders(), loadMarkets(), loadCustomers(), loadProcurementChecks(), loadFulfillmentChecks()]); await loadProductCosts(); } render(); }));
   document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => { const target = button.dataset.scroll; if (state.view !== 'shop') { state.view = 'shop'; render(); requestAnimationFrame(() => document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' })); } else document.querySelector(`#${target}`)?.scrollIntoView({ behavior: 'smooth' }); }));
   document.querySelectorAll('[data-open-market]').forEach((button) => button.addEventListener('click', () => openMarket(button.dataset.openMarket)));

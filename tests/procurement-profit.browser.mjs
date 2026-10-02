@@ -74,6 +74,15 @@ try {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Embedded workflow fits viewport');
     await page.screenshot({path:join(output,`embedded-${width}.png`),fullPage:true});
     await page.locator('[data-profit-back="select"]').click();
+    await page.evaluate(()=>{
+      window.purchaseFixture.state.orders.forEach(order=>order.order_items.filter(item=>item.product_id==='p1').forEach(item=>{item.unit_cost=0;item.unit_cost_overridden=true;}));
+      window.purchaseFixture.render();
+    });
+    await page.locator('[data-profit-next]').click();
+    await page.locator('[data-profit-zero-product="p1"]').check();
+    await page.locator('[data-profit-zero-confirm]').click();
+    assert.equal(await page.locator('[data-profit-product-payer="p1"]').count(),1,'Zero-cost dialog works inside actual app');
+    await page.locator('[data-profit-back="select"]').click();
     await page.locator('[data-procurement-history="history"]').click();
     await page.locator('[data-procurement-product="p1"]').click();
     await page.waitForFunction(()=>document.querySelector('[data-procurement-product="p1"]')===null);

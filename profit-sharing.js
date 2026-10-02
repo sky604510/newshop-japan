@@ -68,6 +68,12 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
   const chosenAmount = () => chosen().reduce((sum, item) => sum + cents(item.unit_price * item.quantity - item.deduction), 0) / 100;
   const groupsFor = (items) => procurementProfitGroups(items.map((item) => ({ ...item, product_id: item.product_id || state.orders.flatMap((order) => order.order_items || []).find((row) => row.id === item.id)?.product_id })), state.markets || [], state.products || []);
   const selectionText = () => `已選 ${groupsFor(chosen()).reduce((sum, group) => sum + group.rows.length, 0)} 個商品・${chosen().reduce((sum, item) => sum + item.quantity, 0)} 件・商品銷售合計 ${money(chosenAmount())}`;
+  const zeroCostGroups = () => groupsFor(chosen()).map((group) => ({ ...group, rows: group.rows.filter((row) => row.items.some((item) => Number(item.unit_cost) === 0)) })).filter((group) => group.rows.length);
+  function enterSettings() {
+    if (!chosen().length) { step = 'select'; render(); toast('沒有保留的商品，請重新選擇要分潤的商品'); return; }
+    chosen().forEach((item) => { draft.payers[item.id] ??= 0; });
+    step = 'settings'; render();
+  }
   async function load() {
     if (!state.user || !['admin', 'owner'].includes(state.profile?.role)) { ready = false; settlements = []; settled = new Set(); draft = null; preview = null; return; }
     const { data, error } = await supabase.from('profit_share_settlements').select('id,completed_at,snapshot').order('completed_at', { ascending: false });
@@ -137,6 +143,7 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     return `<section class="panel">${header}${steps}<div data-profit-form><div class="profit-settings"><label>分潤名稱<input data-profit-title value="${esc(draft.title)}" placeholder="例如：10 月第一批分潤"/></label><label>收帳人<select data-profit-collector>${options(draft.collector)}</select></label></div>${partyTable()}<h3 class="profit-block-title">已選商品與成本付款人</h3>${marketList(chosen(), 'settings')}<div class="section-head"><h3>額外成本</h3><button class="btn btn-light" type="button" data-profit-add-expense>＋ 新增成本</button></div><div data-profit-expenses>${draft.expenses.map(expenseRow).join('')}</div><div class="profit-income"><label>本批實際入帳金額<input data-profit-received type="number" min="0" step="0.01" value="${esc(draft.received === '' ? chosenAmount() : draft.received)}"/></label><label class="inline-check"><input data-profit-confirmed type="checkbox" ${draft.receivedConfirmed ? 'checked' : ''}/> 已確認本批貨款入帳</label></div><div class="profit-step-actions"><button class="btn btn-light" type="button" data-profit-back="select">← 返回選商品</button><button class="btn btn-primary" type="button" data-profit-calculate>計算分潤 →</button></div></div></section>`;
   }
   function modal() {
+    if (state.modal === 'profit-zero-cost') return `<div class="modal-backdrop"><div class="modal profit-zero-cost-modal" role="dialog" aria-modal="true" aria-labelledby="profit-zero-cost-title"><div class="modal-head"><h2 id="profit-zero-cost-title">零成本商品確認</h2><button class="close" data-profit-zero-close aria-label="關閉">×</button></div><p class="profit-warning">以下商品含有成本為 NT$ 0 的訂單品項，請確認成本是否正確。只有勾選的商品會繼續參與本次分潤。</p><div class="profit-zero-list">${zeroCostGroups().map(({market, rows}) => `<section><h3>${esc(market.name)}</h3>${rows.map((row) => `<label class="profit-zero-row"><input type="checkbox" data-profit-zero-product="${esc(row.product.id)}"/>${itemThumbnail({...row.items[0],image_url:row.product.image_url})}<span><strong>${esc(row.product.name)}</strong><small>數量 ${row.quantity}・商品金額 ${money(row.revenue)}・${row.items.every((item) => Number(item.unit_cost) === 0) ? '成本 NT$ 0' : '部分訂單品項成本為 NT$ 0'}</small></span></label>`).join('')}</section>`).join('')}</div><p class="draft-hint">未勾選的商品會從本次選取中排除；有成本的其他商品會保留，不會刪除訂單或採購資料。</p><div class="profit-step-actions"><button class="btn btn-light" data-profit-zero-close>返回選擇</button><button class="btn btn-primary" data-profit-zero-confirm>確認並下一步 →</button></div></div></div>`;
     if (!preview) return '';
     return `<div class="modal-backdrop"><div class="modal profit-result-modal"><div class="modal-head"><h2>${esc(preview.result.title || '分潤結果')}</h2><button class="close" data-profit-close>×</button></div>${preview.completed_at ? `<p>分潤時間：${new Date(preview.completed_at).toLocaleString('zh-TW')}</p>` : ''}${resultHtml(preview.result)}${preview.id ? '' : '<p>確認轉帳完成後，按下「分潤完成」保存本次帳目。</p><button class="btn btn-primary" data-profit-finish>分潤完成</button>'}</div></div>`;
   }
@@ -206,8 +213,8 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
       const remove = event.target.closest('[data-profit-remove-expense]'); if (remove) { remove.closest('[data-profit-expense]').remove(); capture(); }
       if (event.target.closest('[data-profit-next]')) {
         if (!chosen().length) return toast('請選擇要分潤的品項');
-        chosen().forEach((item) => { draft.payers[item.id] ??= 0; });
-        step = 'settings'; render();
+        if (zeroCostGroups().length) { state.modal = 'profit-zero-cost'; render(); }
+        else enterSettings();
       }
       if (event.target.closest('[data-profit-add-party]')) {
         capture(); let number = draft.parties.length + 1;
@@ -230,6 +237,21 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     });
     document.querySelectorAll('[data-profit-back]').forEach((button) => button.addEventListener('click', () => { if (busy) return; capture(); step = button.dataset.profitBack; preview = null; render(); }));
     document.querySelector('[data-profit-finish]')?.addEventListener('click', finish);
+    if (state.modal === 'profit-zero-cost') {
+      const cancel = () => { state.modal = null; render(); };
+      bindBackdropClose(document.querySelector('.modal-backdrop'), cancel);
+      document.querySelectorAll('[data-profit-zero-close]').forEach((button) => button.addEventListener('click', cancel));
+      document.querySelector('[data-profit-zero-confirm]')?.addEventListener('click', () => {
+        const confirmed = new Set([...document.querySelectorAll('[data-profit-zero-product]:checked')].map((input) => input.dataset.profitZeroProduct));
+        let removed = false;
+        zeroCostGroups().forEach((group) => group.rows.forEach((row) => {
+          if (!confirmed.has(row.product.id)) row.items.forEach((item) => { draft.selected.delete(item.id); removed = true; });
+        }));
+        if (removed) { draft.received = chosenAmount(); draft.receivedConfirmed = false; }
+        state.modal = null; enterSettings();
+      });
+      document.querySelector('[data-profit-zero-product]')?.focus();
+    }
     const close = () => { if (busy) return; preview = null; state.modal = null; render(); };
     if (state.modal === 'profit-result') { bindBackdropClose(document.querySelector('.modal-backdrop'), close); document.querySelector('[data-profit-close]')?.addEventListener('click', close); }
   }
