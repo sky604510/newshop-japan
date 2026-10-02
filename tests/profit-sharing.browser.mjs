@@ -10,10 +10,10 @@ const output = await mkdtemp(join(tmpdir(), 'newshop-profit-test-'));
 const source = await readFile(new URL('../profit-sharing.js', import.meta.url), 'utf8');
 const css = (await readFile(new URL('../styles.css', import.meta.url), 'utf8')).replace(/^@import[^\r\n]+\r?\n/, '');
 try {
-  for (const width of [1366, 390]) {
+  for (const width of [1366, 390, 320]) {
     const page = await browser.newPage({ viewport: { width, height: 844 } });
     const errors = []; page.on('pageerror', (error) => errors.push(error.message));
-    await page.route('http://localhost/profit-test', (route) => route.fulfill({ contentType: 'text/html', body: `<meta charset="utf-8"><style>${css}.profit-order-list{min-height:1500px}</style><nav class="admin-tabs">${Array.from({length:7},()=>'<button>管理分頁</button>').join('')}</nav><div id="fixture" style="padding:16px"></div>` }));
+    await page.route('http://localhost/profit-test', (route) => route.fulfill({ contentType: 'text/html', body: `<meta charset="utf-8"><style>${css}</style><nav class="admin-tabs">${Array.from({length:7},()=>'<button>管理分頁</button>').join('')}</nav><div id="fixture" style="padding:16px"></div>` }));
     await page.goto('http://localhost/profit-test');
     await page.evaluate(async (moduleSource) => {
       const { createProfitSharing, calculateProfitShare } = await import(`data:text/javascript;base64,${btoa(unescape(encodeURIComponent(moduleSource)))}`);
@@ -23,7 +23,7 @@ try {
         { id: 'order2', order_number: 'NS-TEST-2', status: 'confirmed', order_items: [{ id: 'c', product_name: '已發貨不能分潤', quantity: 1, unit_price: 500, unit_cost: 100 }] },
       ], fulfillmentChecks: new Map([['a', { shipped_at: '2026-09-30', completed_at: '2026-09-30T00:00:00Z' }], ['c', { shipped_at: '2026-09-30' }]]) };
       const supabase = { from: () => ({ select: () => ({ order: async () => ({ data: structuredClone(records) }) }) }), rpc: async (name, args) => {
-        if (name !== 'admin_complete_profit_share' || args.p_item_ids.join() !== 'a') throw new Error('Incorrect settlement request');
+        if (name !== 'admin_complete_profit_share_v2' || args.p_item_ids.join() !== 'a') throw new Error('Incorrect settlement request');
         window.lastProfitRequest = args;
         const snapshot = calculateProfitShare(args.p_settings.expected_items, args.p_settings); snapshot.title = args.p_settings.title;
         const data = { id: 'saved', completed_at: new Date().toISOString(), snapshot }; records.push(data); return { data: innerWidth < 600 ? [data] : data };
@@ -36,13 +36,28 @@ try {
     }, source);
     assert.equal(await page.locator('[data-profit-item]').count(), 1);
     assert.equal(await page.locator('.profit-item-thumb img').count(), 1);
-    await page.evaluate(() => window.scrollTo(0, 650));
-    const pinned = await page.evaluate(() => ({ controls:document.querySelector('.profit-controls').getBoundingClientRect().top,tabs:document.querySelector('.admin-tabs').getBoundingClientRect().bottom }));
-    assert.ok(Math.abs(pinned.controls - pinned.tabs - 10) < 2, 'Controls stay pinned below admin tabs');
-    await page.screenshot({path:join(output,`controls-${width}.png`)});
-    await page.evaluate(() => window.scrollTo(0,0));
+    assert.equal(await page.locator('[data-profit-title]').count(), 0, 'First step shows selection only');
+    assert.ok(await page.locator('[data-profit-next]').isDisabled());
     await page.locator('[data-profit-order]').check();
-    if (width < 820) await page.locator('.profit-configuration summary').click();
+    await page.screenshot({ path:join(output, `selection-${width}.png`) });
+    await page.locator('[data-profit-next]').click();
+    assert.equal(await page.locator('[data-profit-party]').count(), 1);
+    assert.equal(await page.locator('[data-profit-ratio]').inputValue(), '100');
+    await page.locator('[data-profit-title]').fill('測試分潤批次');
+    await page.screenshot({path:join(output, `settings-${width}.png`),fullPage:true});
+    await page.locator('[data-profit-add-party]').click();
+    assert.deepEqual(await page.locator('[data-profit-ratio]').evaluateAll(rows=>rows.map(row=>row.value)), ['50','50']);
+    await page.locator('[data-profit-add-party]').click();
+    assert.deepEqual(await page.locator('[data-profit-ratio]').evaluateAll(rows=>rows.map(row=>row.value)), ['34','33','33']);
+    assert.ok(await page.locator('.profit-party-table').evaluate(el=>el.getBoundingClientRect().width<=el.parentElement.clientWidth+1), 'Participant table fits without horizontal scrolling');
+    await page.screenshot({path:join(output,`participants-${width}.png`),fullPage:true});
+    await page.locator('[data-profit-remove-party="2"]').click();
+    await page.locator('[data-profit-name]').nth(0).fill('我');
+    await page.locator('[data-profit-name]').nth(1).fill('老婆');
+    await page.locator('[data-profit-back="select"]').click();
+    assert.ok(await page.locator('[data-profit-order]').isChecked(), 'Back retains selection');
+    await page.locator('[data-profit-next]').click();
+    assert.equal(await page.locator('[data-profit-title]').inputValue(), '測試分潤批次');
     await page.locator('[data-profit-collector]').selectOption('1');
     await page.locator('[data-profit-add-expense]').click();
     await page.locator('[data-profit-expense-name]').fill('集運費');
@@ -51,11 +66,28 @@ try {
     await page.locator('[data-profit-confirmed]').check();
     await page.locator('[data-profit-title]').fill('測試分潤批次');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Pending page must fit viewport');
+    await page.locator('[data-profit-ratio]').nth(0).fill('49');
+    await page.locator('[data-profit-calculate]').click();
+    assert.match(await page.evaluate(()=>window.lastProfitToast), /100%/);
+    await page.locator('[data-profit-ratio]').nth(0).fill('50.5');
+    await page.locator('[data-profit-calculate]').click();
+    assert.match(await page.evaluate(()=>window.lastProfitToast), /整數/);
+    await page.locator('[data-profit-ratio]').nth(0).fill('50');
+    await page.locator('[data-profit-add-party]').click();
+    await page.locator('[data-profit-collector]').selectOption('2');
+    await page.locator('[data-profit-calculate]').click();
+    assert.match(await page.locator('.profit-transfer').textContent(), /分潤人3 應轉給 我 NT\$ 1,136/);
+    assert.match(await page.locator('.profit-transfer').textContent(), /分潤人3 應轉給 老婆 NT\$ 232/);
+    await page.locator('[data-profit-back="settings"]').click();
+    await page.locator('[data-profit-remove-party="2"]').click();
+    assert.equal(await page.locator('[data-profit-collector]').inputValue(),'0', 'Removing collector remaps to first participant');
+    await page.locator('[data-profit-collector]').selectOption('1');
     await page.locator('[data-profit-calculate]').click();
     assert.match(await page.locator('.profit-transfer').textContent(), /老婆 應轉給 我 NT\$ 1,200/);
     assert.equal(await page.locator('.profit-result-item img').count(), 1);
-    assert.ok(await page.evaluate(() => document.querySelector('.profit-result-modal').scrollWidth <= document.querySelector('.profit-result-modal').clientWidth), 'Result modal must fit viewport');
-    await page.waitForFunction(() => getComputedStyle(document.querySelector('.profit-result-modal')).opacity === '1');
+    assert.equal(await page.locator('.modal-backdrop').count(), 0, 'Calculation moves to result page, not a popup');
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), 'Result page fits viewport');
+
     await page.screenshot({ path: join(output, `result-${width}.png`) });
     await page.locator('[data-profit-finish]').click();
     await page.locator('[data-profit-history]').waitFor();

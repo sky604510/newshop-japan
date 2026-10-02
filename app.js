@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createProfitSharing } from './profit-sharing.js?v=3';
+import { createProfitSharing } from './profit-sharing.js?v=4';
 import { createDepositManagement } from './deposit-management.js?v=4';
 
 const supabase = createClient(

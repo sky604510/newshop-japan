@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { calculateProfitShare } from '../profit-sharing.js';
+import { calculateProfitShare, equalProfitRatios } from '../profit-sharing.js';
 const { PGlite } = createRequire(import.meta.url)('@electric-sql/pglite');
 const db = new PGlite();
 const admin = '11111111-1111-4111-8111-111111111111';
@@ -28,7 +28,12 @@ try {
     await db.query('insert into public.order_item_fulfillments(order_item_id,shipped_at,completed_at) values ($1,current_date,$2)', [id, completed ? new Date().toISOString() : null]);
   }
   const settings = (id, received = 1500) => ({ title: '測試分潤', parties: [{ name: '我', ratio: 50 }, { name: '老婆', ratio: 50 }], collector: 1, received, receivedConfirmed: true, payers: { [id]: 0 }, expenses: [{ description: '集運', amount: 100, payer: 1 }], expected_items: [{ id, quantity: 1, unit_price: 1500, unit_cost: 1000 }] });
-  const settle = (id, config = settings(id)) => db.query('select * from public.admin_complete_profit_share($1::uuid[], $2::jsonb)', [[id], JSON.stringify(config)]);
+  const settle = (id, config = settings(id)) => db.query('select * from public.admin_complete_profit_share_v2($1::uuid[], $2::jsonb)', [[id], JSON.stringify(config)]);
+  const legacyId = randomUUID(); await seed(legacyId);
+  const legacy = (await db.query('select * from public.admin_complete_profit_share($1::uuid[], $2::jsonb)', [[legacyId], JSON.stringify(settings(legacyId))])).rows[0];
+  const multiPartyMigration = await readFile(new URL('../supabase/profit_sharing_multi_party_upgrade.sql', import.meta.url), 'utf8');
+  await db.exec(multiPartyMigration); await db.exec(multiPartyMigration);
+  assert.deepEqual((await db.query('select snapshot from public.profit_share_settlements where id=$1', [legacy.id])).rows[0].snapshot, legacy.snapshot);
   await seed(ids[0]); await seed(ids[1], false); await seed(ids[2]); await seed(ids[3]);
   await assert.rejects(settle(ids[1]), /PROFIT_ITEM_STATE_CHANGED/);
   await assert.rejects(settle(ids[2], { ...settings(ids[2]), expected_items: [{ id: ids[2], quantity: 1, unit_price: 1500, unit_cost: 999 }] }), /PROFIT_ITEM_AMOUNT_CHANGED/);
@@ -52,6 +57,19 @@ try {
     assert.deepEqual(actual.parties, preview.parties);
     assert.equal(actual.profit, preview.profit);
   }
+  for (const count of [1, 3, 6]) for (const received of [0, 1500.01]) {
+    const id = randomUUID(); await seed(id);
+    const config = { ...settings(id,received), parties:equalProfitRatios(count).map((ratio,index)=>({name:`分潤人${index+1}`,ratio})),collector:count-1,expenses:[{description:'集運',amount:100,payer:count-1}] };
+    const actual = (await settle(id,config)).rows[0].snapshot;
+    const preview = calculateProfitShare(config.expected_items,config);
+    assert.deepEqual(actual.parties,preview.parties);
+    assert.equal(actual.profit,preview.profit);
+  }
+  const invalidId=randomUUID();await seed(invalidId);
+  await assert.rejects(settle(invalidId,{...settings(invalidId),parties:[{name:'A',ratio:50.5},{name:'B',ratio:49.5}]}),/INVALID_PROFIT_SETTINGS/);
+  await assert.rejects(settle(invalidId,{...settings(invalidId),parties:[{name:'A',ratio:50},{name:'A',ratio:50}]}),/INVALID_PROFIT_SETTINGS/);
+  await assert.rejects(settle(invalidId,{...settings(invalidId),collector:2}),/INVALID_PROFIT_SETTINGS/);
+  await assert.rejects(settle(invalidId,{...settings(invalidId),payers:{[invalidId]:2}}),/INVALID_PROFIT_SETTINGS/);
   await db.exec('set role authenticated');
   await assert.rejects(db.exec("insert into public.profit_share_settlements(snapshot) values ('{}')"), /permission denied/);
   await db.exec("select set_config('test.admin','false',false)");

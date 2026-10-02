@@ -425,21 +425,14 @@ body.modal-open .pwa-install { display:none; }
 .editor-item-tools > span { color:var(--muted); font-size:12px; white-space:nowrap; }
 .editor-save-actions,.cart-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 
-.profit-controls { position:sticky; top:var(--profit-sticky-top,12px); z-index:5; display:flex; flex-direction:column; padding:16px; border:1px solid var(--line); border-radius:18px; background:#fffdfd; box-shadow:var(--soft-shadow); max-height:calc(100dvh - var(--profit-sticky-top,12px) - 120px); overflow:hidden; }
-.profit-controls-body { min-height:0; overflow:auto; scrollbar-width:thin; }
-.profit-configuration summary { cursor:pointer; font-weight:800; font-size:14px; }
 .profit-settings { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:12px 0; }
 .profit-settings > label:first-child { grid-column:1; grid-row:1; }
 .profit-settings > label:last-child { grid-column:2; grid-row:1; }
-.profit-controls .section-head { margin:12px 0; gap:12px; }
-.profit-controls h3 { margin:0; font-size:14px; }
-.profit-controls input:not([type=checkbox]),.profit-controls select { padding:9px 11px; }
 .profit-item-thumb { width:48px; height:48px; flex:none; overflow:hidden; display:grid; place-items:center; border:1px solid var(--line); border-radius:10px; background:var(--blush); font-size:10px; color:var(--muted); }
 .profit-item-thumb img { width:100%; height:100%; object-fit:contain; }
 .profit-result-item { display:flex; align-items:center; gap:12px; margin-top:12px; }
 .profit-result-item p { min-width:0; margin:0; }
 .profit-settings label,.profit-expense label,.profit-income > label,.profit-item > label:last-child { display:grid; gap:6px; min-width:0; font-size:12px; font-weight:700; }
-.profit-party { display:grid; grid-template-columns:minmax(0,1fr) 95px; gap:8px; }
 .profit-order-list { display:grid; gap:12px; margin:20px 0; }
 .profit-order { padding:14px; border:1px solid var(--line); border-radius:16px; background:#fffafd; }
 .profit-order header { display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--line); padding-bottom:10px; }
@@ -461,6 +454,19 @@ body.modal-open .pwa-install { display:none; }
 .profit-history { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:18px 0; border-bottom:1px solid var(--line); }
 .profit-history p { margin:6px 0; font-size:13px; }
 .profit-warning { color:var(--rose-deep); }
+.profit-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; list-style:none; padding:0; margin:24px 0; }
+.profit-steps li { display:flex; align-items:center; gap:9px; padding:12px; border:1px solid var(--line); border-radius:12px; color:var(--muted); font-size:13px; }
+.profit-steps li.active { background:var(--blush); color:var(--rose-deep); border-color:var(--rose-deep); font-weight:800; }
+.profit-steps li span { display:grid; place-items:center; width:24px; height:24px; flex:none; border-radius:50%; background:white; }
+.profit-selection-bar { position:sticky; top:var(--profit-sticky-top,170px); z-index:5; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px; border:1px solid var(--line); border-radius:14px; background:var(--paper); box-shadow:var(--soft-shadow); font-size:13px; }
+.profit-select-item { grid-template-columns:minmax(0,1fr); }
+.profit-party-table { min-width:0; }
+.profit-party-table input { width:100%; min-width:0; }
+.profit-party-table th:nth-child(2) { width:110px; }
+.profit-party-table th:last-child { width:75px; }
+.profit-party-table .btn { padding:8px 12px; white-space:nowrap; }
+.profit-step-actions { display:flex; justify-content:space-between; gap:12px; margin:24px 0 12px; padding-top:18px; border-top:1px solid var(--line); }
+.profit-block-title,.profit-result-items { margin-top:28px; }
 
 .reveal { opacity:0; transform:translateY(16px); animation:reveal .62s cubic-bezier(.2,.8,.2,1) forwards; animation-delay:var(--delay,0ms); }
 @keyframes reveal { to { opacity:1; transform:none; } }
@@ -568,8 +574,19 @@ body.modal-open .pwa-install { display:none; }
   .editor-item-tools { justify-content:space-between; }
   .editor-save-actions { width:100%; }
   .profit-settings,.profit-party-results { grid-template-columns:minmax(0,1fr); }
+  .profit-steps { gap:6px; }
+  .profit-party-table { min-width:0; table-layout:fixed; }
+  [data-profit-form] .section-head { flex-direction:row; align-items:center; gap:10px; margin:20px 0 12px; }
+  [data-profit-form] .section-head h3 { margin:0; font-size:16px; }
+  .profit-steps li { flex-direction:column; padding:9px 4px; font-size:11px; gap:6px; }
+  .profit-selection-bar { top:190px; gap:8px; font-size:11px; }
+  .profit-selection-bar .btn { padding:10px 12px; white-space:nowrap; }
+  .profit-party-table td,.profit-party-table th { padding:8px 4px; }
+  .profit-party-table th:nth-child(2) { width:70px; }
+  .profit-party-table th:last-child { width:58px; }
+  .profit-party-table input { padding:8px; }
+  .profit-party-table .btn { padding:8px; font-size:11px; }
   .profit-settings > label:first-child,.profit-settings > label:last-child { grid-column:auto; grid-row:auto; }
-  .profit-controls { padding:12px; max-height:min(42dvh,calc(100dvh - var(--profit-sticky-top,12px) - 120px)); }
   .profit-income { grid-template-columns:minmax(0,1fr); }
   .profit-item { grid-template-columns:minmax(0,1fr); }
   .profit-item > label:last-child { max-width:220px; margin-left:27px; }
