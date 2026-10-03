@@ -51,9 +51,10 @@ export function procurementProfitGroups(items, markets = [], products = []) {
   return [...groups.values()].sort((a, b) => markets.indexOf(a.market) - markets.indexOf(b.market)).map(({ market, rows }) => ({ market, rows: [...rows.values()].sort((a, b) => market.products.findIndex((entry) => entry.id === a.product.id) - market.products.findIndex((entry) => entry.id === b.product.id)).map((row) => ({ ...row, cost: Math.round(row.quantity ? row.totalCost / row.quantity : 0), price: row.quantity ? row.revenue / row.quantity : 0, buyers: row.buyerKeys.size, profit: row.revenue - row.deduction - row.totalCost })) }));
 }
 
-export function procuredProfitItems(orders, procurementChecks, settled, getCost, getDeduction = () => 0) {
+export function completedProfitItems(orders, fulfillmentChecks, settled, getCost, getDeduction = () => 0) {
   return orders.filter((order) => order.status !== 'cancelled').flatMap((order) => (order.order_items || []).filter((item) => {
-    return Boolean(item.product_id && procurementChecks.get(item.product_id)?.is_purchased) && !settled.has(item.id);
+    const fulfillment = fulfillmentChecks.get(item.id);
+    return Boolean(fulfillment?.shipped_at && fulfillment?.completed_at) && !settled.has(item.id);
   }).map((item) => ({ id: item.id, order_id: order.id, order_number: order.order_number, recipient: order.recipient_name, buyer_key: order.customer_id || order.phone, market_id: item.market_id, name: item.product_name, quantity: Number(item.quantity), unit_price: Number(item.unit_price), unit_cost: getCost(item), product_id: item.product_id, deduction: getDeduction(order, item) })));
 }
 
@@ -61,7 +62,7 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
   let step = 'select';
   let stickyObserver;
   let ready = false, settlements = [], settled = new Set(), view = 'pending', draft = null, preview = null, busy = false;
-  const pending = () => procuredProfitItems(state.orders, state.procurementChecks, settled, getCost, getDeduction).map((item) => ({ ...item, image_url: (state.products || []).find((product) => product.id === item.product_id)?.image_url || '' }));
+  const pending = () => completedProfitItems(state.orders, state.fulfillmentChecks, settled, getCost, getDeduction).map((item) => ({ ...item, image_url: (state.products || []).find((product) => product.id === item.product_id)?.image_url || '' }));
   const freshDraft = () => ({ selected: new Set(), title: '', parties: [{ name: '分潤人1', ratio: 100 }], collector: 0, received: '', receivedConfirmed: false, payers: {}, expenses: [] });
   const options = (selected) => draft.parties.map((party, index) => `<option value="${index}" ${index === selected ? 'selected' : ''}>${esc(party.name || `分潤人 ${index + 1}`)}</option>`).join('');
   const chosen = () => pending().filter((item) => draft?.selected.has(item.id));
@@ -123,7 +124,7 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
       const rates = rows.map((row) => Number(row.product.exchange_rate || 0)).filter((rate) => rate > 0);
       const averageRate = rates.length ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : 0;
       return `<article class="summary-card" data-profit-market-card="${esc(market.id)}"><div class="summary-head"><h3>${mode === 'select' ? `<input type="checkbox" data-profit-market="${esc(market.id)}" aria-label="選取 ${esc(market.name)} 全部商品" ${all.every((item) => draft.selected.has(item.id)) ? 'checked' : ''}/>` : ''}${esc(market.name)}</h3><span>獲利 ${money(totalProfit)}</span></div><div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整商品統計 →</div><div class="table-wrap"><table class="admin-table procurement-table profit-market-table"><thead><tr><th>${mode === 'select' ? '選取' : ''}</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th>${mode !== 'select' ? '<th>成本付款人</th>' : ''}</tr></thead><tbody>${rows.map((row) => `<tr data-profit-product-row="${esc(row.product.id)}"><td>${mode === 'select' ? `<input class="procurement-check" type="checkbox" data-profit-product="${esc(row.product.id)}" aria-label="選取 ${esc(row.product.name)}" ${row.items.every((item) => draft.selected.has(item.id)) ? 'checked' : ''}/>` : ''}</td><td><div class="procurement-product">${itemThumbnail({...row.items[0],image_url:row.product.image_url})}<span><strong>${esc(mode === 'result' ? row.items[0].name : row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString('zh-TW')}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString('zh-TW')}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}${row.deduction ? `<small>已扣商品內扣 ${money(row.deduction)}</small>` : ''}</td>${mode === 'settings' ? `<td><select data-profit-product-payer="${esc(row.product.id)}" aria-label="${esc(row.product.name)} 成本付款人">${options(draft.payers[row.items[0].id] ?? 0)}</select></td>` : mode === 'result' ? `<td>${[...new Set(row.items.map((item) => parties[item.payer]?.name || '未記錄'))].map(esc).join('、')}</td>` : ''}</tr>`).join('')}</tbody><tfoot><tr class="procurement-subtotal"><td></td><td><strong>小計</strong></td><td><strong>${quantity}</strong></td><td>${rows.reduce((sum,row)=>sum+Number(row.product.foreign_cost || 0)*row.quantity,0).toLocaleString('zh-TW',{maximumFractionDigits:2})}</td><td>${averageRate.toLocaleString('zh-TW', { maximumFractionDigits: 4 })}</td><td>—</td><td>—</td><td>${rows.reduce((sum,row)=>sum+row.buyers,0)}</td><td class="profit"><strong>${money(totalProfit)}</strong></td>${mode !== 'select' ? '<td></td>' : ''}</tr></tfoot></table></div></article>`;
-    }).join('') || '<div class="empty">目前沒有採購完成且尚未分潤的商品</div>'}</div>`;
+    }).join('') || '<div class="empty">目前沒有發貨清單中已完成且尚未分潤的商品</div>'}</div>`;
   }
   function marketStats(items) {
     const rows = groupsFor(items).flatMap((group) => group.rows);
@@ -134,9 +135,9 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
   }
   function panel() {
     if (!draft) draft = freshDraft();
-    const header = `<div class="section-head"><div><span class="eyebrow">PROFIT SHARING</span><h2>分潤清單</h2><p>依採購歷史的賣場與商品彙整；只列未分潤數量，已分潤部分不重複結算。</p></div></div><div class="sub-tabs"><button data-profit-view="pending" class="${view === 'pending' ? 'active' : ''}">待分潤</button><button data-profit-view="settled" class="${view === 'settled' ? 'active' : ''}">已分潤</button></div>`;
+    const header = `<div class="section-head"><div><span class="eyebrow">PROFIT SHARING</span><h2>分潤清單</h2><p>只從發貨清單「已完成」載入，依賣場與商品彙整；已分潤部分不重複結算。</p></div></div><div class="sub-tabs"><button data-profit-view="pending" class="${view === 'pending' ? 'active' : ''}">待分潤</button><button data-profit-view="settled" class="${view === 'settled' ? 'active' : ''}">已分潤</button></div>`;
     if (!ready) return `<section class="panel">${header}<div class="empty">分潤功能尚未啟用，請先執行 profit_sharing_upgrade.sql。</div></section>`;
-    if (view === 'settled') return `<section class="panel">${header}${settlements.map((entry) => `<article class="profit-history"><div><strong>${esc(entry.snapshot.title || '分潤批次')}</strong><p>分潤時間：${new Date(entry.completed_at).toLocaleString('zh-TW')}</p><p>${entry.snapshot.items.length} 個品項・入帳 ${money(entry.snapshot.received)}・利潤 ${money(entry.snapshot.profit)}</p>${entry.snapshot.items.some((item) => state.orders.some((order) => (order.order_items || []).some((row) => row.id === item.id)) && !state.procurementChecks.get(item.product_id || state.orders.flatMap((order) => order.order_items || []).find((row) => row.id === item.id)?.product_id)?.is_purchased) ? '<p class="profit-warning">部分品項已移回待採購；本批分潤紀錄仍保留。</p>' : ''}</div><button class="btn btn-light" data-profit-history="${entry.id}">查看結果</button></article>`).join('') || '<div class="empty">尚無已分潤紀錄</div>'}</section>`;
+    if (view === 'settled') return `<section class="panel">${header}${settlements.map((entry) => `<article class="profit-history"><div><strong>${esc(entry.snapshot.title || '分潤批次')}</strong><p>分潤時間：${new Date(entry.completed_at).toLocaleString('zh-TW')}</p><p>${entry.snapshot.items.length} 個品項・入帳 ${money(entry.snapshot.received)}・利潤 ${money(entry.snapshot.profit)}</p>${entry.snapshot.items.some((item) => state.orders.some((order) => (order.order_items || []).some((row) => row.id === item.id)) && !state.fulfillmentChecks.get(item.id)?.completed_at) ? '<p class="profit-warning">部分品項已從已完成還原；本批分潤紀錄仍保留。</p>' : ''}</div><button class="btn btn-light" data-profit-history="${entry.id}">查看結果</button></article>`).join('') || '<div class="empty">尚無已分潤紀錄</div>'}</section>`;
     const steps = `<ol class="profit-steps" aria-label="分潤步驟">${['選擇商品', '分潤設定', '結果確認'].map((label, index) => `<li class="${['select', 'settings', 'result'].indexOf(step) === index ? 'active' : ''}"><span>${index + 1}</span>${label}</li>`).join('')}</ol>`;
     if (step === 'result' && preview && !preview.id) return `<section class="panel">${header}${steps}<h3>${esc(preview.result.title || '分潤結果')}</h3>${resultHtml(preview.result)}<div class="profit-step-actions"><button class="btn btn-light" data-profit-back="settings" ${busy ? 'disabled' : ''}>返回設定</button><button class="btn btn-primary" data-profit-finish ${busy ? 'disabled' : ''}>${busy ? '儲存中…' : '分潤完成'}</button></div><p class="draft-hint">確認轉帳完成後，再按「分潤完成」保存帳目與時間。</p></section>`;
     if (step === 'select') return `<section class="panel">${header}${steps}<div data-profit-form>${marketStats(pending())}<div class="profit-selection-bar"><strong data-profit-selection>${selectionText()}</strong><button class="btn btn-primary" data-profit-next ${chosen().length ? '' : 'disabled'}>下一步 →</button></div>${marketList(pending())}</div></section>`;
@@ -161,15 +162,15 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     if (busy || !preview || preview.id) return;
     busy = true; const button = document.querySelector('[data-profit-finish]'); if (button) { button.disabled = true; button.textContent = '儲存中…'; }
     try {
-      const { data, error } = await supabase.rpc('admin_complete_procurement_profit_share', { p_item_ids: preview.result.items.map((item) => item.id), p_settings: { ...preview.settings, selected: undefined, expected_items: preview.result.items } });
+      const { data, error } = await supabase.rpc('admin_complete_profit_share_v2', { p_item_ids: preview.result.items.map((item) => item.id), p_settings: { ...preview.settings, selected: undefined, expected_items: preview.result.items } });
       if (error) throw error;
       const record = Array.isArray(data) ? data[0] : data;
       if (!record?.snapshot?.items) throw new Error('分潤結果回傳異常，請重新載入已分潤清單確認');
       settlements.unshift(record); settled = new Set([...settled, ...record.snapshot.items.map((item) => item.id)]);
       draft = freshDraft(); step = 'select'; preview = null; state.modal = null; view = 'settled'; render(); toast('分潤完成，已保存結算結果與時間');
     } catch (error) {
-      const messages = { INVALID_PROFIT_SETTINGS: '請確認入帳金額、分潤比例與成本付款人', PROFIT_ITEM_STATE_CHANGED: '部分品項已不在採購歷史，請重新選取', PROFIT_ITEM_ALREADY_SETTLED: '部分品項已分潤，請重新選取', PROFIT_ITEM_AMOUNT_CHANGED: '訂單金額或成本已變更，請重新計算' };
-      toast(/admin_complete_procurement_profit_share|schema cache/i.test(error.message || '') ? '請先執行 profit_sharing_procurement_upgrade.sql，啟用採購歷史分潤' : messages[error.message] || error.message);
+      const messages = { INVALID_PROFIT_SETTINGS: '請確認入帳金額、分潤比例與成本付款人', PROFIT_ITEM_STATE_CHANGED: '部分品項已不在發貨清單的已完成資料，請重新選取', PROFIT_ITEM_ALREADY_SETTLED: '部分品項已分潤，請重新選取', PROFIT_ITEM_AMOUNT_CHANGED: '訂單金額或成本已變更，請重新計算' };
+      toast(/admin_complete_profit_share_v2|schema cache/i.test(error.message || '') ? '請先執行 profit_sharing_multi_party_upgrade.sql，啟用已完成商品分潤' : messages[error.message] || error.message);
       if (/PROFIT_ITEM_/.test(error.message)) {
         try { await reload(); await load(); preview = null; step = 'select'; state.modal = null; render(); }
         catch (refreshError) { toast(`重新載入失敗：${refreshError.message}`); }

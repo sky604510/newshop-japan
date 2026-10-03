@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateProfitShare, procuredProfitItems, createProfitSharing, equalProfitRatios, procurementProfitGroups } from '../profit-sharing.js';
+import { calculateProfitShare, completedProfitItems, createProfitSharing, equalProfitRatios, procurementProfitGroups } from '../profit-sharing.js';
 
 const parties = [{ name: '我', ratio: 50 }, { name: '老婆', ratio: 50 }];
 const item = { id: 'a', quantity: 1, unit_price: 1500, unit_cost: 1000 };
@@ -62,12 +62,12 @@ test('拒絕未入帳、無效比例與無效額外成本', () => {
   assert.throws(() => calculateProfitShare([item], { ...settings, parties: [{ name: '我', ratio: 30 }, { name: '老婆', ratio: 30 }] }));
   assert.throws(() => calculateProfitShare([item], { ...settings, expenses: [{ description: '集運', amount: -1, payer: 0 }] }));
 });
-test('來源只限採購歷史：未發貨可分潤、未採購和已分潤均排除', () => {
-  const orders = [{ id:'order',status:'confirmed',order_items:['pending','bought','settled','bought-again','removed'].map((id)=>({...item,id,product_id:id==='bought-again'?'bought':id})) },{status:'cancelled',order_items:[{...item,id:'cancelled',product_id:'bought'}]}];
-  const checks = new Map([['pending',{is_purchased:false}],['bought',{is_purchased:true}],['settled',{is_purchased:true}]]);
-  assert.deepEqual(procuredProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).map(entry=>entry.id),['bought','bought-again']);
-  checks.set('bought',{is_purchased:false});
-  assert.equal(procuredProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).length,0);
+test('來源只限發貨已完成：排除待發貨、僅已發貨、取消與已分潤品項', () => {
+  const orders = [{ id:'order',status:'confirmed',order_items:['pending','shipped','completed','settled','completed-again'].map(id=>({...item,id,product_id:'same-product'})) },{status:'cancelled',order_items:[{...item,id:'cancelled'}]}];
+  const checks = new Map([['shipped',{shipped_at:'2026-10-01'}],...['completed','settled','completed-again','cancelled'].map(id=>[id,{shipped_at:'2026-10-01',completed_at:'2026-10-02'}])]);
+  assert.deepEqual(completedProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).map(entry=>entry.id),['completed','completed-again']);
+  checks.get('completed').completed_at=null;
+  assert.deepEqual(completedProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).map(entry=>entry.id),['completed-again']);
 });
 test('還原提醒重新讀取已分潤紀錄，不能因本地資料過期漏掉提醒', async () => {
   let records = [];
