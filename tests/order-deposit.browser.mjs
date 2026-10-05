@@ -20,7 +20,7 @@ try {
       const orderItems = [{ id: 'item1', product_id: 'p1', market_id: 'm1', product_name: '商品', unit_cost: 300, unit_price: 1000, quantity: 1, subtotal: 1000 }];
       const records = [
         { id: 'o1', order_number: 'NS-1', recipient_name: '同名', phone: '', delivery_method: '面交取貨', status: 'pending', deposit_amount: 200, deposit_deduction: 100, deposit_note: '原訂金備註', total_amount: 900, order_items: orderItems },
-        { id: 'o2', order_number: 'NS-2', recipient_name: '同名', phone: '', delivery_method: '面交取貨', status: 'pending', deposit_amount: 300, total_amount: 500, order_items: [] },
+        { id: 'o2', order_number: 'NS-2', recipient_name: '同名', phone: '', delivery_method: '面交取貨', status: 'completed', deposit_amount: 300, total_amount: 500, order_items: [] },
       ];
       const refunds = []; window.dbCalls = [];
       const createClient = () => ({ auth: { onAuthStateChange() {} }, from: (table) => ({ select: () => ({ order: async () => ({ data: structuredClone(table === 'order_deposit_refunds' ? refunds : records) }) }) }), rpc: async (name, args) => {
@@ -40,7 +40,7 @@ try {
       eval(appSource + `
         state.user = { id: 'member', email: 'buyer@example.com' }; state.profile = { role: 'member' }; state.loading = false;
         state.cart = [{ id: 'p1', product_id: 'p1', market_id: 'm1', name: '商品', price: 1000, qty: 1, stock: 10 }];
-        state.orders = records; state.customers = [{ id: 'c1', recipient_name: '常客', phone: '', delivery_method: '面交取貨', is_regular: true }];
+        state.orders = records; state.products = [{ id: 'p1', image_url: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40"%3E%3Crect width="40" height="40" fill="pink"/%3E%3C/svg%3E' }]; state.customers = [{ id: 'c1', recipient_name: '常客', phone: '', delivery_method: '面交取貨', is_regular: true }];
         state.modal = 'checkout'; render(); window.testHooks = { state, render, openOrderEditor, depositManagement, shipmentSummaries, statementSnapshotCanvas };
       `);
     }, { appSource: source, depositSource: deposits });
@@ -94,6 +94,7 @@ try {
       await link.hover();
       await page.locator('.deposit-order-preview').waitFor();
       assert.match(await page.locator('.deposit-order-preview').textContent(),/商品 × 1/);
+      assert.equal(await page.locator('.deposit-order-preview img').count(),1);
       assert.doesNotMatch(await page.locator('.deposit-order-preview').textContent(),/NT\$|300|1000/);
       await page.screenshot({path:join(output,`preview-${width}.png`)});
       await page.mouse.move(0,0);
@@ -113,11 +114,11 @@ try {
       assert.equal(await page.locator('.order-editor-modal').count(),0,'Sliding after long press must not navigate');
       await link.tap();
     }
-    await page.locator('.order-editor-modal').waitFor();
-    assert.match(await page.locator('.order-editor-modal h2').textContent(),/NS-1/);
+    await page.locator('#order-o1.order-highlight').waitFor();
+    assert.equal(await page.locator('.order-editor-modal').count(),0);
+    assert.equal(await page.locator('[data-order-history="current"]').getAttribute('class'),'active');
     assert.equal(await page.locator('[data-admin-tab="orders"]').getAttribute('class'),'active');
     assert.equal(await page.locator('.deposit-order-preview').count(),0);
-    await page.locator('[data-action="close-order-editor"]').first().click();
     await page.evaluate(()=>{window.testHooks.state.adminTab='deposits';window.testHooks.render();});
     await page.locator('[data-deposit-refund]').click();
     assert.equal(await page.locator('#deposit-refund-amount').inputValue(), '400');
@@ -132,7 +133,19 @@ try {
     assert.match(await page.locator('.deposit-group').textContent(), /銀行尾號1234/);
     assert.equal(await page.locator('.deposit-group--refunded').count(),1);
     assert.equal(await page.locator('.deposit-group--refunded').evaluate(el=>getComputedStyle(el).display),'grid');
+    assert.equal(await page.locator('.deposit-group--refunded [data-deposit-order]').count(),2);
+    if (width >= 600) {
+      await page.locator('[data-deposit-order="o1"]').hover();
+      assert.equal(await page.locator('.deposit-order-preview img').count(),1);
+    }
     await page.screenshot({path:join(output,`refunded-${width}.png`),fullPage:true});
+    await page.locator('[data-deposit-order="o2"]').click();
+    await page.locator('#order-o2.order-highlight').waitFor();
+    assert.equal(await page.locator('[data-order-history="history"]').getAttribute('class'),'active');
+    assert.equal(await page.locator('[data-order-history="history"]').textContent(),'歷史訂單');
+    assert.equal(await page.locator('#order-o1').count(),0);
+    assert.equal(await page.locator('.order-editor-modal').count(),0);
+    await page.locator('[data-admin-tab="deposits"]').click();
     await page.locator('[data-deposit-view="received"]').click();
     assert.match(await page.locator('.deposit-group').textContent(), /可退訂金 NT\$ 150/);
     const snapshot = await page.evaluate(async () => {

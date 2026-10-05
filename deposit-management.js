@@ -17,7 +17,10 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
     previewElement = document.createElement('div');
     previewElement.className = 'deposit-order-preview';
     previewElement.id = 'deposit-order-preview'; previewElement.setAttribute('role', 'tooltip');
-    previewElement.innerHTML = `<strong>訂單商品</strong><ul>${(order.order_items || []).map((item) => `<li>${esc(item.product_name)} × ${Number(item.quantity)}</li>`).join('') || '<li>此訂單沒有商品</li>'}</ul>`;
+    previewElement.innerHTML = `<strong>訂單商品</strong><ul>${(order.order_items || []).map((item) => {
+      const image = state.products.find((product) => product.id === item.product_id)?.image_url || item.image_url || '';
+      return `<li><span class="deposit-preview-thumb">${image ? `<img src="${esc(image)}" alt=""/>` : '<span>無圖片</span>'}</span><span>${esc(item.product_name)} × ${Number(item.quantity)}</span></li>`;
+    }).join('') || '<li>此訂單沒有商品</li>'}</ul>`;
     document.body.append(previewElement); link.setAttribute('aria-describedby', previewElement.id);
     positionOrderPreview(x, y);
   }
@@ -109,7 +112,7 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
       const batch = batches.get(refund.batch_id);
       batch.orders.push(refund); batch.total += Number(refund.amount);
     });
-    return `<section class="panel">${header}<div class="deposit-groups">${[...batches.values()].map((batch) => `<article class="deposit-group deposit-group--refunded"><div><h3>${esc(batch.recipient_name)}</h3>${batch.phone ? `<small>${esc(batch.phone)}</small>` : ''}<div class="deposit-sources">${batch.orders.map((order) => `<div class="deposit-source"><p><span>${esc(order.order_number)}</span><strong>${money(order.amount)}</strong></p>${state.orders.find((entry) => entry.id === order.order_id)?.deposit_note ? `<small>備註：${esc(state.orders.find((entry) => entry.id === order.order_id).deposit_note)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><strong>已退 ${money(batch.total)}</strong><span>退款日期 ${esc(batch.refund_date)}</span><span>退款來源 ${esc(batch.refund_source)}</span>${batch.refund_account ? `<span>退款帳戶 ${esc(batch.refund_account)}</span>` : ''}</div></article>`).join('') || '<div class="empty">目前沒有退款紀錄</div>'}</div></section>`;
+    return `<section class="panel">${header}<div class="deposit-groups">${[...batches.values()].map((batch) => `<article class="deposit-group deposit-group--refunded"><div><h3>${esc(batch.recipient_name)}</h3>${batch.phone ? `<small>${esc(batch.phone)}</small>` : ''}<div class="deposit-sources">${batch.orders.map((order) => `<div class="deposit-source"><p><a class="deposit-order-link" data-deposit-order="${esc(order.order_id)}" href="#order-${esc(order.order_id)}">${esc(order.order_number)}</a><strong>${money(order.amount)}</strong></p>${state.orders.find((entry) => entry.id === order.order_id)?.deposit_note ? `<small>備註：${esc(state.orders.find((entry) => entry.id === order.order_id).deposit_note)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><strong>已退 ${money(batch.total)}</strong><span>退款日期 ${esc(batch.refund_date)}</span><span>退款來源 ${esc(batch.refund_source)}</span>${batch.refund_account ? `<span>退款帳戶 ${esc(batch.refund_account)}</span>` : ''}</div></article>`).join('') || '<div class="empty">目前沒有退款紀錄</div>'}</div></section>`;
   }
 
   function modal() {
