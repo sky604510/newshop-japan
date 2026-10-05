@@ -1,3 +1,29 @@
+export const COST_PEOPLE = ['豪', '盈'];
+
+export function validAllocation(value, quantity) {
+  return Array.isArray(value) && value.length === 2 && value.every((n) => Number.isSafeInteger(n) && n >= 0) && value[0] + value[1] === Number(quantity);
+}
+
+export function allocateQuantities(items, haoQuantity) {
+  const total = items.reduce((sum, item) => sum + Number(item.quantity), 0);
+  if (!Number.isSafeInteger(haoQuantity) || haoQuantity < 0 || haoQuantity > total) throw new Error('豪的件數須為 0 到商品總數量的整數');
+  let remaining = haoQuantity;
+  return Object.fromEntries([...items].sort((a, b) => a.id.localeCompare(b.id)).map((item) => {
+    const hao = Math.min(remaining, Number(item.quantity)); remaining -= hao;
+    return [item.id, [hao, Number(item.quantity) - hao]];
+  }));
+}
+
+export function allocationSummary(items, allocations = {}) {
+  const counts = [0, 0];
+  for (const item of items) {
+    const value = allocations[item.id];
+    if (!validAllocation(value, item.quantity)) return { mode: '', label: '未指定／數量已變更', counts };
+    counts[0] += value[0]; counts[1] += value[1];
+  }
+  return { counts, mode: counts[1] === 0 ? '0' : counts[0] === 0 ? '1' : 'shared', label: counts[1] === 0 ? '豪' : counts[0] === 0 ? '盈' : `豪 ${counts[0]}／盈 ${counts[1]}` };
+}
+
 const cents = (value) => Math.round(Number(value) * 100);
 
 export function equalProfitRatios(count) {
@@ -16,7 +42,12 @@ export function calculateProfitShare(items, settings) {
     const payer = settings.payers[item.id];
     if (!validParty(payer)) throw new Error('請指定商品成本付款人');
     const cost = cents(item.unit_cost * item.quantity);
-    itemCost += cost; revenue += cents(item.unit_price * item.quantity); parties[payer].advance += cost;
+    itemCost += cost; revenue += cents(item.unit_price * item.quantity); const allocation = settings.allocations?.[item.id];
+    if (allocation) {
+      if (!validAllocation(allocation, item.quantity) || parties.length !== 2) throw new Error('商品成本分配件數不正確');
+      const first = cents(item.unit_cost * allocation[0]);
+      parties[0].advance += first; parties[1].advance += cost - first;
+    } else parties[payer].advance += cost;
   }
   for (const expense of settings.expenses) {
     if (!expense.description.trim() || !Number.isFinite(expense.amount) || expense.amount < 0 || !validParty(expense.payer)) throw new Error('請填寫額外成本用途、金額與付款人');
@@ -30,7 +61,7 @@ export function calculateProfitShare(items, settings) {
   priority.slice(0, remainder).forEach(({ index }) => { parties[index].share++; });
   if (profit < 0) parties.forEach((party) => { party.share = -party.share; });
   parties.forEach((party, index) => { party.balance = party.advance + party.share - (index === settings.collector ? received : 0); });
-  return { revenue: revenue / 100, received: received / 100, item_cost: itemCost / 100, extra_cost: extraCost / 100, profit: profit / 100, collector: settings.collector, parties: parties.map((party) => ({ ...party, advance: party.advance / 100, share: party.share / 100, balance: party.balance / 100 })), expenses: settings.expenses.map((expense) => ({ ...expense, amount: cents(expense.amount) / 100 })), items: items.map((item) => ({ ...item, payer: settings.payers[item.id] })) };
+  return { revenue: revenue / 100, received: received / 100, item_cost: itemCost / 100, extra_cost: extraCost / 100, profit: profit / 100, collector: settings.collector, parties: parties.map((party) => ({ ...party, advance: party.advance / 100, share: party.share / 100, balance: party.balance / 100 })), expenses: settings.expenses.map((expense) => ({ ...expense, amount: cents(expense.amount) / 100 })), items: items.map((item) => ({ ...item, payer: settings.payers[item.id], ...(settings.allocations?.[item.id] ? { allocation: settings.allocations[item.id] } : {}) })) };
 }
 
 export function procurementProfitGroups(items, markets = [], products = []) {
@@ -63,7 +94,7 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
   let stickyObserver;
   let ready = false, settlements = [], settled = new Set(), view = 'pending', draft = null, preview = null, busy = false;
   const pending = () => completedProfitItems(state.orders, state.fulfillmentChecks, settled, getCost, getDeduction).map((item) => ({ ...item, image_url: (state.products || []).find((product) => product.id === item.product_id)?.image_url || '' }));
-  const freshDraft = () => ({ selected: new Set(), title: '', parties: [{ name: '分潤人1', ratio: 100 }], collector: 0, received: '', receivedConfirmed: false, payers: {}, expenses: [] });
+  const freshDraft = () => ({ selected: new Set(), title: '', parties: [{ name: '豪', ratio: 50 }, { name: '盈', ratio: 50 }], collector: 0, received: '', receivedConfirmed: false, payers: {}, allocations: {}, expenses: [] });
   const options = (selected) => draft.parties.map((party, index) => `<option value="${index}" ${index === selected ? 'selected' : ''}>${esc(party.name || `分潤人 ${index + 1}`)}</option>`).join('');
   const chosen = () => pending().filter((item) => draft?.selected.has(item.id));
   const chosenAmount = () => chosen().reduce((sum, item) => sum + cents(item.unit_price * item.quantity - item.deduction), 0) / 100;
@@ -72,8 +103,17 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
   const zeroCostGroups = () => groupsFor(chosen()).map((group) => ({ ...group, rows: group.rows.filter((row) => row.items.some((item) => Number(item.unit_cost) === 0)) })).filter((group) => group.rows.length);
   function enterSettings() {
     if (!chosen().length) { step = 'select'; render(); toast('沒有保留的商品，請重新選擇要分潤的商品'); return; }
-    chosen().forEach((item) => { draft.payers[item.id] ??= 0; });
+    try { syncAllocations(); } catch (error) { toast(error.message); return; }
     step = 'settings'; render();
+  }
+  function syncAllocations() {
+    draft.allocations = {}; draft.payers = {};
+    for (const item of chosen()) {
+      const allocation = state.procurementChecks.get(item.product_id)?.cost_allocations?.[item.id];
+      if (!validAllocation(allocation, item.quantity)) throw new Error('請先到採購清單指定成本人；數量變更後須重新分配');
+      draft.allocations[item.id] = [...allocation];
+      draft.payers[item.id] = allocation[0] ? 0 : 1;
+    }
   }
   async function load() {
     if (!state.user || !['admin', 'owner'].includes(state.profile?.role)) { ready = false; settlements = []; settled = new Set(); draft = null; preview = null; return; }
@@ -90,11 +130,10 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     const root = document.querySelector('[data-profit-form]'); if (!root || !draft) return;
     if (!root.querySelector('[data-profit-title]')) return;
     draft.title = root.querySelector('[data-profit-title]').value;
-    draft.parties = [...root.querySelectorAll('[data-profit-party]')].map((row) => ({ name: row.querySelector('[data-profit-name]').value, ratio: row.querySelector('[data-profit-ratio]').value === '' ? NaN : Number(row.querySelector('[data-profit-ratio]').value) }));
+    draft.parties = [...root.querySelectorAll('[data-profit-party]')].map((row, index) => ({ name: COST_PEOPLE[index], ratio: row.querySelector('[data-profit-ratio]').value === '' ? NaN : Number(row.querySelector('[data-profit-ratio]').value) }));
     draft.collector = Number(root.querySelector('[data-profit-collector]').value);
     draft.received = root.querySelector('[data-profit-received]').value;
     draft.receivedConfirmed = root.querySelector('[data-profit-confirmed]').checked;
-    root.querySelectorAll('[data-profit-product-payer]').forEach((select) => { chosen().filter((item) => item.product_id === select.dataset.profitProductPayer).forEach((item) => { draft.payers[item.id] = Number(select.value); }); });
     draft.expenses = [...root.querySelectorAll('[data-profit-expense]')].map((row) => ({ key: row.dataset.profitExpense, description: row.querySelector('[data-profit-expense-name]').value, amount: Number(row.querySelector('[data-profit-expense-amount]').value), payer: Number(row.querySelector('[data-profit-expense-payer]').value) }));
   }
   function expenseRow(expense) {
@@ -116,6 +155,16 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     const extraCosts = result.expenses.length ? `<h3>額外成本</h3>${result.expenses.map((expense) => `<p>${esc(expense.description)}・${money(expense.amount)}・${esc(result.parties[expense.payer].name)} 付款</p>`).join('')}` : '';
     return `<div class="profit-totals"><p>商品銷售金額<strong>${money(result.revenue)}</strong></p><p>實際入帳<strong>${money(result.received)}</strong></p><p>商品成本<strong>${money(result.item_cost)}</strong></p><p>額外成本<strong>${money(result.extra_cost)}</strong></p><p>可分${result.profit < 0 ? '虧損' : '利潤'}<strong>${money(result.profit)}</strong></p></div><div class="profit-party-results">${result.parties.map((party, index) => `<article><strong>${esc(party.name)}（${party.ratio}%）${index === result.collector ? '・收帳人' : ''}</strong><p>代墊款 ${money(party.advance)}</p><p>分得${party.share < 0 ? '虧損' : '利潤'} ${money(party.share)}</p><p>應${party.balance < 0 ? '轉出' : '收取'} ${money(Math.abs(party.balance))}</p></article>`).join('')}</div><div class="profit-transfer">${transfers.length ? transfers.join('<br/>') : '本次不需互相轉帳'}</div>${extraCosts}<section class="profit-result-items"><h3>本次商品統計</h3>${marketList(result.items, 'result', result.parties)}</section>`;
   }
+  function costLabel(items, mode, parties) {
+    const counts = [0, 0];
+    for (const item of items) {
+      const allocation = mode === 'result' ? item.allocation : state.procurementChecks.get(item.product_id)?.cost_allocations?.[item.id];
+      if (validAllocation(allocation, item.quantity)) { counts[0] += allocation[0]; counts[1] += allocation[1]; }
+      else if (mode === 'result') return [...new Set(items.map((entry) => parties[entry.payer]?.name || '未記錄'))].map(esc).join('、');
+      else return '未指定／數量已變更';
+    }
+    return counts.map((count, index) => count ? esc((parties?.[index]?.name || COST_PEOPLE[index]) + ' ×' + count) : '').filter(Boolean).join('、');
+  }
   function marketList(items, mode = 'select', parties = []) {
     const groups = groupsFor(items);
     return `<div class="summary-grid profit-market-list">${groups.map(({market, rows}) => {
@@ -123,7 +172,7 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
       const all = rows.flatMap((row) => row.items);
       const rates = rows.map((row) => Number(row.product.exchange_rate || 0)).filter((rate) => rate > 0);
       const averageRate = rates.length ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : 0;
-      return `<article class="summary-card" data-profit-market-card="${esc(market.id)}"><div class="summary-head"><h3>${mode === 'select' ? `<input type="checkbox" data-profit-market="${esc(market.id)}" aria-label="選取 ${esc(market.name)} 全部商品" ${all.every((item) => draft.selected.has(item.id)) ? 'checked' : ''}/>` : ''}${esc(market.name)}</h3><span>獲利 ${money(totalProfit)}</span></div><div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整商品統計 →</div><div class="table-wrap"><table class="admin-table procurement-table profit-market-table"><thead><tr><th>${mode === 'select' ? '選取' : ''}</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th>${mode !== 'select' ? '<th>成本付款人</th>' : ''}</tr></thead><tbody>${rows.map((row) => `<tr data-profit-product-row="${esc(row.product.id)}"><td>${mode === 'select' ? `<input class="procurement-check" type="checkbox" data-profit-product="${esc(row.product.id)}" aria-label="選取 ${esc(row.product.name)}" ${row.items.every((item) => draft.selected.has(item.id)) ? 'checked' : ''}/>` : ''}</td><td><div class="procurement-product">${itemThumbnail({...row.items[0],image_url:row.product.image_url})}<span><strong>${esc(mode === 'result' ? row.items[0].name : row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString('zh-TW')}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString('zh-TW')}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}${row.deduction ? `<small>已扣商品內扣 ${money(row.deduction)}</small>` : ''}</td>${mode === 'settings' ? `<td><select data-profit-product-payer="${esc(row.product.id)}" aria-label="${esc(row.product.name)} 成本付款人">${options(draft.payers[row.items[0].id] ?? 0)}</select></td>` : mode === 'result' ? `<td>${[...new Set(row.items.map((item) => parties[item.payer]?.name || '未記錄'))].map(esc).join('、')}</td>` : ''}</tr>`).join('')}</tbody><tfoot><tr class="procurement-subtotal"><td></td><td><strong>小計</strong></td><td><strong>${quantity}</strong></td><td>${rows.reduce((sum,row)=>sum+Number(row.product.foreign_cost || 0)*row.quantity,0).toLocaleString('zh-TW',{maximumFractionDigits:2})}</td><td>${averageRate.toLocaleString('zh-TW', { maximumFractionDigits: 4 })}</td><td>—</td><td>—</td><td>${rows.reduce((sum,row)=>sum+row.buyers,0)}</td><td class="profit"><strong>${money(totalProfit)}</strong></td>${mode !== 'select' ? '<td></td>' : ''}</tr></tfoot></table></div></article>`;
+      return `<article class="summary-card" data-profit-market-card="${esc(market.id)}"><div class="summary-head"><h3>${mode === 'select' ? `<input type="checkbox" data-profit-market="${esc(market.id)}" aria-label="選取 ${esc(market.name)} 全部商品" ${all.every((item) => draft.selected.has(item.id)) ? 'checked' : ''}/>` : ''}${esc(market.name)}</h3><span>獲利 ${money(totalProfit)}</span></div><div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整商品統計 →</div><div class="table-wrap"><table class="admin-table procurement-table profit-market-table"><thead><tr><th>${mode === 'select' ? '選取' : ''}</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th>${mode !== 'select' ? '<th>成本付款人</th>' : ''}</tr></thead><tbody>${rows.map((row) => `<tr data-profit-product-row="${esc(row.product.id)}"><td>${mode === 'select' ? `<input class="procurement-check" type="checkbox" data-profit-product="${esc(row.product.id)}" aria-label="選取 ${esc(row.product.name)}" ${row.items.every((item) => draft.selected.has(item.id)) ? 'checked' : ''}/>` : ''}</td><td><div class="procurement-product">${itemThumbnail({...row.items[0],image_url:row.product.image_url})}<span><strong>${esc(mode === 'result' ? row.items[0].name : row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString('zh-TW')}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString('zh-TW')}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}${row.deduction ? `<small>已扣商品內扣 ${money(row.deduction)}</small>` : ''}</td>${mode !== 'select' ? `<td>${costLabel(row.items, mode, parties)}</td>` : ''}</tr>`).join('')}</tbody><tfoot><tr class="procurement-subtotal"><td></td><td><strong>小計</strong></td><td><strong>${quantity}</strong></td><td>${rows.reduce((sum,row)=>sum+Number(row.product.foreign_cost || 0)*row.quantity,0).toLocaleString('zh-TW',{maximumFractionDigits:2})}</td><td>${averageRate.toLocaleString('zh-TW', { maximumFractionDigits: 4 })}</td><td>—</td><td>—</td><td>${rows.reduce((sum,row)=>sum+row.buyers,0)}</td><td class="profit"><strong>${money(totalProfit)}</strong></td>${mode !== 'select' ? '<td></td>' : ''}</tr></tfoot></table></div></article>`;
     }).join('') || '<div class="empty">目前沒有發貨清單中已完成且尚未分潤的商品</div>'}</div>`;
   }
   function marketStats(items) {
@@ -131,8 +180,9 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     return `<div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${rows.reduce((sum, row) => sum + row.quantity, 0)}</strong></div><div class="stat"><small>本頁未分潤商品</small><strong>${rows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(rows.reduce((sum, row) => sum + row.profit, 0))}</strong></div></div>`;
   }
   function partyTable() {
-    return `<div class="section-head"><h3>分潤人</h3><button type="button" class="btn btn-light" data-profit-add-party>＋ 添加分潤人</button></div><div class="table-wrap"><table class="admin-table profit-party-table"><thead><tr><th>分潤人名稱</th><th>比例（%）</th><th>操作</th></tr></thead><tbody>${draft.parties.map((party, index) => `<tr data-profit-party><td><input data-profit-name aria-label="分潤人 ${index + 1} 名稱" value="${esc(party.name)}"/></td><td><input data-profit-ratio aria-label="分潤人 ${index + 1} 比例" type="number" min="0" max="100" step="1" value="${Number.isFinite(party.ratio) ? party.ratio : ''}"/></td><td><button class="btn btn-danger-soft" type="button" data-profit-remove-party="${index}" ${draft.parties.length === 1 ? 'disabled' : ''}>移除</button></td></tr>`).join('')}</tbody></table></div><p data-profit-ratio-total class="draft-hint">比例合計：${draft.parties.reduce((sum, party) => sum + party.ratio, 0)}%（須為 100%，不使用小數）</p>`;
+    return `<h3>分潤人</h3><div class="table-wrap"><table class="admin-table profit-party-table"><thead><tr><th>分潤人名稱</th><th>比例（%）</th></tr></thead><tbody>${draft.parties.map((party) => `<tr data-profit-party><td><strong>${esc(party.name)}</strong></td><td><input data-profit-ratio aria-label="${esc(party.name)} 分潤比例" type="number" min="0" max="100" step="1" value="${Number.isFinite(party.ratio) ? party.ratio : ''}"/></td></tr>`).join('')}</tbody></table></div><p data-profit-ratio-total class="draft-hint">比例合計：${draft.parties.reduce((sum, party) => sum + party.ratio, 0)}%（須為 100%，不使用小數）</p>`;
   }
+
   function panel() {
     if (!draft) draft = freshDraft();
     const header = `<div class="section-head"><div><span class="eyebrow">PROFIT SHARING</span><h2>分潤清單</h2><p>只從發貨清單「已完成」載入，依賣場與商品彙整；已分潤部分不重複結算。</p></div></div><div class="sub-tabs"><button data-profit-view="pending" class="${view === 'pending' ? 'active' : ''}">待分潤</button><button data-profit-view="settled" class="${view === 'settled' ? 'active' : ''}">已分潤</button></div>`;
@@ -151,7 +201,7 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
   async function calculate() {
     capture();
     try {
-      const items = chosen(); if (!items.length) throw new Error('請選擇要分潤的品項');
+      syncAllocations(); const items = chosen(); if (!items.length) throw new Error('請選擇要分潤的品項');
       if (draft.received === '') throw new Error('請填寫實際入帳金額');
       const settings = { ...draft, received: Number(draft.received) };
       const result = calculateProfitShare(items, settings); result.title = draft.title.trim();
@@ -162,15 +212,15 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     if (busy || !preview || preview.id) return;
     busy = true; const button = document.querySelector('[data-profit-finish]'); if (button) { button.disabled = true; button.textContent = '儲存中…'; }
     try {
-      const { data, error } = await supabase.rpc('admin_complete_profit_share_v2', { p_item_ids: preview.result.items.map((item) => item.id), p_settings: { ...preview.settings, selected: undefined, expected_items: preview.result.items } });
+      const { data, error } = await supabase.rpc('admin_complete_profit_share_v3', { p_item_ids: preview.result.items.map((item) => item.id), p_settings: { ...preview.settings, selected: undefined, expected_items: preview.result.items } });
       if (error) throw error;
       const record = Array.isArray(data) ? data[0] : data;
       if (!record?.snapshot?.items) throw new Error('分潤結果回傳異常，請重新載入已分潤清單確認');
       settlements.unshift(record); settled = new Set([...settled, ...record.snapshot.items.map((item) => item.id)]);
       draft = freshDraft(); step = 'select'; preview = null; state.modal = null; view = 'settled'; render(); toast('分潤完成，已保存結算結果與時間');
     } catch (error) {
-      const messages = { INVALID_PROFIT_SETTINGS: '請確認入帳金額、分潤比例與成本付款人', PROFIT_ITEM_STATE_CHANGED: '部分品項已不在發貨清單的已完成資料，請重新選取', PROFIT_ITEM_ALREADY_SETTLED: '部分品項已分潤，請重新選取', PROFIT_ITEM_AMOUNT_CHANGED: '訂單金額或成本已變更，請重新計算' };
-      toast(/admin_complete_profit_share_v2|schema cache/i.test(error.message || '') ? '請先執行 profit_sharing_multi_party_upgrade.sql，啟用已完成商品分潤' : messages[error.message] || error.message);
+      const messages = { PROFIT_COST_ALLOCATION_CHANGED: '成本分配已變更，請回到採購清單確認後重新計算', INVALID_PROFIT_SETTINGS: '請確認入帳金額、分潤比例與成本付款人', PROFIT_ITEM_STATE_CHANGED: '部分品項已不在發貨清單的已完成資料，請重新選取', PROFIT_ITEM_ALREADY_SETTLED: '部分品項已分潤，請重新選取', PROFIT_ITEM_AMOUNT_CHANGED: '訂單金額或成本已變更，請重新計算' };
+      toast(/admin_complete_profit_share_v3|schema cache/i.test(error.message || '') ? '請先執行 procurement_cost_people_upgrade.sql，啟用已完成商品分潤' : messages[error.message] || error.message);
       if (/PROFIT_ITEM_/.test(error.message)) {
         try { await reload(); await load(); preview = null; step = 'select'; state.modal = null; render(); }
         catch (refreshError) { toast(`重新載入失敗：${refreshError.message}`); }
@@ -194,7 +244,6 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
     });
     root?.addEventListener('change', (event) => {
       const input = event.target; capture();
-      if (input.matches('[data-profit-name]')) root.querySelectorAll('[data-profit-collector],[data-profit-product-payer],[data-profit-expense-payer]').forEach((select) => { select.innerHTML = options(Number(select.value)); });
       if (input.matches('[data-profit-product],[data-profit-market]')) {
         const rows = groupsFor(pending()).flatMap((group) => input.matches('[data-profit-market]') ? (group.market.id === input.dataset.profitMarket ? group.rows : []) : group.rows.filter((row) => row.product.id === input.dataset.profitProduct));
         rows.flatMap((row) => row.items).forEach((item) => { if (input.checked) draft.selected.add(item.id); else draft.selected.delete(item.id); });
@@ -216,23 +265,6 @@ export function createProfitSharing({ state, supabase, esc, money, getCost, getD
         if (!chosen().length) return toast('請選擇要分潤的品項');
         if (zeroCostGroups().length) { state.modal = 'profit-zero-cost'; render(); }
         else enterSettings();
-      }
-      if (event.target.closest('[data-profit-add-party]')) {
-        capture(); let number = draft.parties.length + 1;
-        while (draft.parties.some((party) => party.name === `分潤人${number}`)) number++;
-        draft.parties.push({ name: `分潤人${number}`, ratio: 0 });
-        const ratios = equalProfitRatios(draft.parties.length);
-        draft.parties.forEach((party, index) => { party.ratio = ratios[index]; }); render();
-      }
-      const removeParty = event.target.closest('[data-profit-remove-party]');
-      if (removeParty && draft.parties.length > 1) {
-        capture(); const index = Number(removeParty.dataset.profitRemoveParty); draft.parties.splice(index, 1);
-        const remap = (value) => value === index ? 0 : value > index ? value - 1 : value;
-        draft.collector = remap(draft.collector);
-        Object.keys(draft.payers).forEach((id) => { draft.payers[id] = remap(draft.payers[id]); });
-        draft.expenses.forEach((expense) => { expense.payer = remap(expense.payer); });
-        const ratios = equalProfitRatios(draft.parties.length);
-        draft.parties.forEach((party, position) => { party.ratio = ratios[position]; }); render();
       }
       if (event.target.closest('[data-profit-calculate]')) calculate();
     });

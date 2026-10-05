@@ -18,7 +18,7 @@ try {
       const { createProfitSharing, calculateProfitShare } = await import(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
       const products = [{ id:'p1', name:'零成本商品 <一>' }, { id:'p2', name:'混合成本商品' }, { id:'p3', name:'有成本商品' }];
       const items = [{ id:'a', product_id:'p1', product_name:products[0].name, quantity:2, unit_price:200, unit_cost:0 }, { id:'b', product_id:'p2', product_name:products[1].name, quantity:1, unit_price:300, unit_cost:0 }, { id:'b2', product_id:'p2', product_name:products[1].name, quantity:1, unit_price:300, unit_cost:100 }, { id:'c', product_id:'p3', product_name:products[2].name, quantity:1, unit_price:500, unit_cost:200 }];
-      const state = { user:{id:'admin'}, profile:{role:'owner'}, markets:[{id:'m1',name:'測試賣場',products}], products, orders:[{id:'o1',recipient_name:'買家',status:'confirmed',order_items:items}], fulfillmentChecks:new Map(items.map(item=>[item.id,{shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:'2026-10-02'}])) };
+      const state = { user:{id:'admin'}, profile:{role:'owner'}, procurementChecks:new Map(products.map(product=>[product.id,{cost_allocations:Object.fromEntries(items.filter(item=>item.product_id===product.id).map(item=>[item.id,[item.quantity,0]]))}])), markets:[{id:'m1',name:'測試賣場',products}], products, orders:[{id:'o1',recipient_name:'買家',status:'confirmed',order_items:items}], fulfillmentChecks:new Map(items.map(item=>[item.id,{shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:'2026-10-02'}])) };
       let controller;
       const records = [];
       const supabase = { from:()=>({select:()=>({order:async()=>({data:structuredClone(records)})})}), rpc:async(name,args)=>{
@@ -46,8 +46,8 @@ try {
     await page.locator('[data-profit-next]').click();
     await page.locator('[data-profit-zero-product="p1"]').check();
     await page.locator('[data-profit-zero-confirm]').click();
-    assert.equal(await page.locator('[data-profit-product-payer="p2"]').count(),0);
-    assert.equal(await page.locator('[data-profit-product-payer]').count(),2,'Keep confirmed zero cost and nonzero cost products');
+    assert.equal(await page.locator('[data-profit-product-row="p2"]').count(),0);
+    assert.equal(await page.locator('[data-profit-product-row]').count(),2,'Keep confirmed zero cost and nonzero cost products');
     assert.equal(await page.locator('[data-profit-received]').inputValue(),'900','Exclude rejected product from amount');
     await page.locator('[data-profit-back="select"]').click();
     await page.locator('[data-profit-product="p3"]').uncheck();
