@@ -28,6 +28,10 @@ try {
       const createClient = () => ({ auth: { onAuthStateChange() {} }, from: () => ({ select: async (columns) => window.oldBatchSchema && columns.includes('reconciliation_batch_id') ? { error: { message: 'column reconciliation_batch_id does not exist' } } : { data: structuredClone(records) } }), rpc: async (name, args) => {
         window.shipCalls.push({ name, args });
         await new Promise((resolve) => setTimeout(resolve, 100));
+        if (name === 'admin_rename_shipment_group') {
+          records.filter(record=>record.reconciliation_batch_id===args.p_batch_id).forEach(record=>record.reconciliation_batch_name=args.p_name);
+          return { error: null };
+        }
         args.p_order_item_ids.forEach(id => {
           if (name === 'admin_ship_order_items') records.push({order_item_id:id,shipped_at:args.p_shipped_at,completed_at:null,reconciled_at:null});
           else {
@@ -99,6 +103,22 @@ try {
     assert.ok(await page.locator('[data-reconcile-selected]').isDisabled());
     await page.locator('[data-reconcile-select="A"]').check();
     await page.locator('[data-reconcile-select="D"]').check();
+    assert.equal(await page.locator('.reconciliation-toolbar').evaluate(el=>getComputedStyle(el).position),'sticky');
+    assert.equal(await page.locator('.reconciliation-toolbar').evaluate(el=>getComputedStyle(el).borderRadius),'14px');
+    await page.evaluate(() => {
+      const panel=document.querySelector('.reconciliation-toolbar').closest('.panel');
+      const spacer=document.createElement('div');spacer.style.height='1500px';spacer.id='sticky-test-spacer';panel.append(spacer);
+      window.scrollTo(0,900);
+    });
+    await page.waitForTimeout(100);
+    const sticky = await page.evaluate(() => {
+      const bar=document.querySelector('.reconciliation-toolbar'), tabs=document.querySelector('.admin-tabs');
+      return { top:bar.getBoundingClientRect().top, expected:parseFloat(getComputedStyle(bar).top), tabBottom:tabs.getBoundingClientRect().bottom };
+    });
+    assert.ok(Math.abs(sticky.top-sticky.expected)<2,'Toolbar remains pinned when scrolling');
+    assert.ok(sticky.top>=sticky.tabBottom+9,'Toolbar clears the sticky admin navigation');
+    await page.screenshot({path:join(output,`sticky-${width}.png`)});
+    await page.evaluate(()=>{document.querySelector('#sticky-test-spacer').remove();window.scrollTo(0,0);});
     assert.match(await page.locator('[data-reconcile-summary]').textContent(),/2 筆・總金額 NT\$ 300・總獲利 NT\$ 150/);
     await page.locator('[data-reconcile-select="D"]').uncheck();
     assert.match(await page.locator('[data-reconcile-summary]').textContent(),/1 筆・總金額 NT\$ 200・總獲利 NT\$ 100/);
@@ -128,7 +148,22 @@ try {
     assert.match(completedExport.filename, /已完成清單/);
     assert.equal(completedExport.sheets.GROUP彙總[1][3],300);
     assert.equal(completedExport.sheets.GROUP彙總[1][4],150);
-    assert.match(completedExport.sheets.已完成清單[0][0],/GROUP/);
+    assert.equal(completedExport.sheets.已完成清單[0][0],'20261005_0800');
+    assert.equal(await page.locator('.reconciliation-group-name h3').textContent(),'20261005_0800');
+    const rename = page.locator('[data-rename-shipment-group]');
+    page.once('dialog',dialog=>dialog.dismiss());
+    await rename.click();
+    assert.equal(await page.evaluate(()=>window.shipCalls.at(-1).name),'admin_reconcile_shipment_items','Cancel does not save a name');
+    page.once('dialog',dialog=>dialog.accept('   '));
+    await rename.click();
+    assert.equal(await page.evaluate(()=>window.shipCalls.at(-1).name),'admin_reconcile_shipment_items','Blank names are rejected');
+    page.once('dialog',dialog=>dialog.accept('十月第一批對帳'));
+    await rename.click();
+    await page.waitForFunction(()=>document.querySelector('.reconciliation-group-name h3').textContent==='十月第一批對帳');
+    await page.evaluate(async()=>{await window.testHooks.loadFulfillmentChecks();window.testHooks.render();});
+    assert.equal(await page.locator('.reconciliation-group-name h3').textContent(),'十月第一批對帳','Rename survives reload');
+    await page.locator('[data-action="export-shipment"]').click();
+    assert.equal(await page.evaluate(()=>window.exports.at(-1).sheets.已完成清單[0][0]),'十月第一批對帳','Excel uses the edited name');
     await page.screenshot({path:join(output,`completed-${width}.png`),fullPage:true});
     page.once('dialog',dialog=>dialog.accept());
     await page.locator('[data-unreconcile-recipient="A"]').click();

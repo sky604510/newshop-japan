@@ -106,6 +106,16 @@ try {
   await db.exec(groupMigration);
   assert.equal((await db.query('select reconciliation_batch_id from public.order_item_fulfillments where order_item_id=$1',[awaitingId])).rows[0].reconciliation_batch_id,legacyBatch,'Migration replay preserves batch IDs');
   assert.equal((await db.query('select reconciled_at from public.order_item_fulfillments where order_item_id=$1',[legacyId])).rows[0].reconciled_at,null,'Awaiting items are not promoted');
+  const namesMigration = await readFile(new URL('../supabase/shipment_reconciliation_names_upgrade.sql', import.meta.url), 'utf8');
+  await db.exec(namesMigration); await db.exec(namesMigration);
+  const batchName = (await db.query("select reconciliation_batch_name, to_char(reconciled_at at time zone 'Asia/Taipei','YYYYMMDD_HH24MI') as expected from public.order_item_fulfillments where order_item_id=$1",[awaitingId])).rows[0];
+  assert.equal(batchName.reconciliation_batch_name,batchName.expected,'Existing group names use Taipei time');
+  await db.query('select public.admin_rename_shipment_group($1,$2)',[legacyBatch,'自訂批次']);
+  await db.exec(namesMigration);
+  assert.equal((await db.query('select reconciliation_batch_name from public.order_item_fulfillments where order_item_id=$1',[awaitingId])).rows[0].reconciliation_batch_name,'自訂批次','Migration replay preserves edited names');
+  await assert.rejects(db.query('select public.admin_rename_shipment_group($1,$2)',[legacyBatch,'  ']),/INVALID_GROUP_NAME/);
+  await assert.rejects(db.query('select public.admin_rename_shipment_group($1,$2)',[legacyBatch,'x'.repeat(101)]),/INVALID_GROUP_NAME/);
+  await assert.rejects(db.query('select public.admin_rename_shipment_group($1,$2)',[randomUUID(),'未知批次']),/SHIPMENT_GROUP_NOT_FOUND/);
   const groupItems = [randomUUID(),randomUUID(),randomUUID()];
   for (const id of groupItems) await seed(id);
   await assert.rejects(db.query('select public.admin_reconcile_shipment_items($1::uuid[],true)',[[groupItems[0],ids[1]]]),/SHIPMENT_STATE_CHANGED/);
@@ -114,10 +124,14 @@ try {
   const firstGroup = (await db.query('select reconciliation_batch_id from public.order_item_fulfillments where order_item_id=any($1::uuid[])',[groupItems.slice(0,2)])).rows;
   assert.ok(firstGroup[0].reconciliation_batch_id);
   assert.equal(firstGroup[0].reconciliation_batch_id,firstGroup[1].reconciliation_batch_id);
+  await db.query('select public.admin_rename_shipment_group($1,$2)',[firstGroup[0].reconciliation_batch_id,'兩筆一起命名']);
+  const renamedGroup = (await db.query('select reconciliation_batch_name from public.order_item_fulfillments where order_item_id=any($1::uuid[])',[groupItems.slice(0,2)])).rows;
+  assert.ok(renamedGroup.every(row=>row.reconciliation_batch_name==='兩筆一起命名'));
   await db.query('select public.admin_reconcile_shipment_items($1::uuid[],true)',[[groupItems[2]]]);
   assert.notEqual((await db.query('select reconciliation_batch_id from public.order_item_fulfillments where order_item_id=$1',[groupItems[2]])).rows[0].reconciliation_batch_id,firstGroup[0].reconciliation_batch_id,'Separate reconciliation creates a different group');
   await db.query('select public.admin_reconcile_shipment_items($1::uuid[],false)',[[groupItems[0]]]);
   assert.equal((await db.query('select reconciliation_batch_id from public.order_item_fulfillments where order_item_id=$1',[groupItems[0]])).rows[0].reconciliation_batch_id,null);
+  assert.equal((await db.query('select reconciliation_batch_name from public.order_item_fulfillments where order_item_id=$1',[groupItems[0]])).rows[0].reconciliation_batch_name,null,'Restoring clears the former group name');
   assert.equal((await db.query('select reconciliation_batch_id from public.order_item_fulfillments where order_item_id=$1',[groupItems[1]])).rows[0].reconciliation_batch_id,firstGroup[0].reconciliation_batch_id);
   await db.query('select public.admin_set_shipment_items_completed($1::uuid[],false)',[[groupItems[1]]]);
   assert.equal((await db.query('select reconciliation_batch_id from public.order_item_fulfillments where order_item_id=$1',[groupItems[1]])).rows[0].reconciliation_batch_id,null);
@@ -138,5 +152,6 @@ try {
   assert.equal((await db.query('select * from public.profit_share_settlements')).rows.length, 0);
   await assert.rejects(settle(ids[2]), /ADMIN_REQUIRED/);
   await assert.rejects(procurementSettle(ids[2]),/permission denied/);
+  await assert.rejects(db.query('select public.admin_rename_shipment_group($1,$2)',[legacyBatch,'非法修改']),/ADMIN_REQUIRED/);
   console.log('PASS PostgreSQL: migration replay, completed-only, stale amounts, duplicate settlement, restore acknowledgment, immutable history, rounding, RLS and admin permissions');
 } finally { await db.close(); }
