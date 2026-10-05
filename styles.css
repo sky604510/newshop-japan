@@ -206,6 +206,17 @@ textarea { resize:vertical; }
 .deposit-group-total { display:grid; align-content:center; justify-items:start; gap:8px; }
 .deposit-group-total span { font-size:13px; color:var(--muted); }
 .deposit-group-total strong { white-space:nowrap; }
+.deposit-group--refunded { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:24px; }
+.deposit-group--refunded > div { min-width:0; }
+.deposit-group--refunded .deposit-sources p { justify-content:flex-start; flex-wrap:wrap; }
+.deposit-group--refunded .deposit-group-total { align-content:start; padding-top:2px; }
+.deposit-group--refunded .deposit-group-total span { overflow-wrap:anywhere; }
+.deposit-order-link { color:var(--rose-deep); text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; touch-action:pan-y; -webkit-touch-callout:none; }
+.deposit-order-link:focus-visible { outline:2px solid var(--rose-deep); outline-offset:3px; border-radius:3px; }
+.deposit-order-preview { position:fixed; z-index:100; width:max-content; max-width:min(340px,calc(100vw - 16px)); max-height:calc(100dvh - 16px); overflow:auto; pointer-events:none; padding:12px 16px; border:1px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink); box-shadow:var(--soft-shadow); font-size:13px; overflow-wrap:anywhere; }
+.deposit-order-preview ul { margin:8px 0 0; padding-left:18px; }
+.deposit-order-preview li + li { margin-top:6px; }
+@media (max-width:600px) { .deposit-group--refunded { grid-template-columns:minmax(0,1fr); gap:14px; } }
 .deposit-refund-modal { width:min(520px,100%); }
 .deposit-refund-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
 .admin-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }

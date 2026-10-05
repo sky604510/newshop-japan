@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createProfitSharing } from './profit-sharing.js?v=9';
-import { createDepositManagement } from './deposit-management.js?v=4';
+import { createDepositManagement } from './deposit-management.js?v=5';
 
 const supabase = createClient(
   'https://qikmnuchhfmkseoenawr.supabase.co',
@@ -72,7 +72,12 @@ function friendlyError(error) {
 const profitSharing = createProfitSharing({ state, supabase, esc, money, getCost: currentOrderItemCost, getDeduction: (order, item) => orderDeductionShares(order).get(item.id) || 0, render, toast: renderToast, bindBackdropClose,
   reload: () => Promise.all([loadOrders(), loadFulfillmentChecks(), loadMarkets(), loadProcurementChecks()]),
 });
-const depositManagement = createDepositManagement({ state, supabase, esc, money, render, toast: renderToast, bindBackdropClose });
+const depositManagement = createDepositManagement({ state, supabase, esc, money, render, toast: renderToast, bindBackdropClose, openOrder: (orderId) => {
+  const order = state.orders.find((entry) => entry.id === orderId);
+  if (!order) { renderToast('找不到這筆訂單'); return; }
+  state.adminTab = 'orders'; state.adminOrderHistory = ['completed', 'cancelled'].includes(order.status);
+  openOrderEditor(orderId);
+} });
 
 function normalizeMarkets(markets) {
   return (markets || []).map((market, marketIndex) => ({

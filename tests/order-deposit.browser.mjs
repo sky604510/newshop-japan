@@ -1,14 +1,17 @@
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const source = (await readFile(new URL('../app.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '').replace(/render\(\);\r?\ninitialize\(\);\s*$/, '');
 const deposits = await readFile(new URL('../deposit-management.js', import.meta.url), 'utf8');
 const css = (await readFile(new URL('../styles.css', import.meta.url), 'utf8')).replace(/^@import[^\r\n]+\r?\n/, '');
+const output = await mkdtemp(join(tmpdir(), 'newshop-deposit-preview-'));
 try {
   for (const width of [1366, 390]) {
-    const page = await browser.newPage({ viewport: { width, height: 844 } });
+    const page = await browser.newPage({ viewport: { width, height: 844 }, hasTouch: width < 600 });
     const errors = []; page.on('pageerror', (error) => errors.push(error.message));
     await page.route('http://localhost/deposit-test', (route) => route.fulfill({ contentType: 'text/html', body: `<style>${css}</style><div id="app"></div>` }));
     await page.goto('http://localhost/deposit-test');
@@ -86,6 +89,36 @@ try {
     assert.match(await page.locator('.deposit-group').textContent(), /總訂金 NT\$ 500/);
     assert.match(await page.locator('.deposit-group').textContent(), /可退訂金 NT\$ 400/);
     assert.match(await page.locator('.deposit-group').textContent(), /原訂金備註/);
+    const link = page.locator('[data-deposit-order="o1"]');
+    if (width >= 600) {
+      await link.hover();
+      await page.locator('.deposit-order-preview').waitFor();
+      assert.match(await page.locator('.deposit-order-preview').textContent(),/商品 × 1/);
+      assert.doesNotMatch(await page.locator('.deposit-order-preview').textContent(),/NT\$|300|1000/);
+      await page.screenshot({path:join(output,`preview-${width}.png`)});
+      await page.mouse.move(0,0);
+      assert.equal(await page.locator('.deposit-order-preview').count(),0);
+      await link.click();
+    } else {
+      await link.scrollIntoViewIfNeeded();
+      const rect = await link.boundingBox(), x=rect.x+rect.width/2, y=rect.y+rect.height/2;
+      const touch = await page.context().newCDPSession(page);
+      await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+      await page.locator('.deposit-order-preview').waitFor();
+      assert.match(await page.locator('.deposit-order-preview').textContent(),/商品 × 1/);
+      await page.screenshot({path:join(output,`preview-${width}.png`)});
+      await touch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+25,y}]});
+      await page.waitForFunction(()=>!document.querySelector('.deposit-order-preview'));
+      await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      assert.equal(await page.locator('.order-editor-modal').count(),0,'Sliding after long press must not navigate');
+      await link.tap();
+    }
+    await page.locator('.order-editor-modal').waitFor();
+    assert.match(await page.locator('.order-editor-modal h2').textContent(),/NS-1/);
+    assert.equal(await page.locator('[data-admin-tab="orders"]').getAttribute('class'),'active');
+    assert.equal(await page.locator('.deposit-order-preview').count(),0);
+    await page.locator('[data-action="close-order-editor"]').first().click();
+    await page.evaluate(()=>{window.testHooks.state.adminTab='deposits';window.testHooks.render();});
     await page.locator('[data-deposit-refund]').click();
     assert.equal(await page.locator('#deposit-refund-amount').inputValue(), '400');
     await page.locator('#deposit-refund-amount').fill('250');
@@ -97,6 +130,9 @@ try {
     assert.equal(calls[3].args.p_amount, 250);
     assert.match(await page.locator('.deposit-group').textContent(), /已退 NT\$ 250/);
     assert.match(await page.locator('.deposit-group').textContent(), /銀行尾號1234/);
+    assert.equal(await page.locator('.deposit-group--refunded').count(),1);
+    assert.equal(await page.locator('.deposit-group--refunded').evaluate(el=>getComputedStyle(el).display),'grid');
+    await page.screenshot({path:join(output,`refunded-${width}.png`),fullPage:true});
     await page.locator('[data-deposit-view="received"]').click();
     assert.match(await page.locator('.deposit-group').textContent(), /可退訂金 NT\$ 150/);
     const snapshot = await page.evaluate(async () => {
@@ -133,4 +169,5 @@ try {
     console.log(`PASS ${width}px: general and regular checkout, unlimited note, admin edit, recipient refund, partial balance`);
     await page.close();
   }
+  console.log(`Screenshots: ${output}`);
 } finally { await browser.close(); }

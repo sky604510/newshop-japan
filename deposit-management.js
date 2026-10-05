@@ -1,7 +1,72 @@
 const recipientKey = (name, phone) => `${String(name || '').trim().toLowerCase()}|${String(phone || '').replace(/\D/g, '')}`;
 
-export function createDepositManagement({ state, supabase, esc, money, render, toast, bindBackdropClose }) {
+export function createDepositManagement({ state, supabase, esc, money, render, toast, bindBackdropClose, openOrder }) {
   let ready = false, refunds = [], view = 'received', selected = null, busy = false;
+  let previewController, previewTimer, previewElement;
+
+  function hideOrderPreview() {
+    clearTimeout(previewTimer); previewTimer = null;
+    document.querySelector('[data-deposit-order][aria-describedby]')?.removeAttribute('aria-describedby');
+    previewElement?.remove(); previewElement = null;
+  }
+
+  function showOrderPreview(link, x, y) {
+    hideOrderPreview();
+    const order = state.orders.find((entry) => entry.id === link.dataset.depositOrder);
+    if (!order) return;
+    previewElement = document.createElement('div');
+    previewElement.className = 'deposit-order-preview';
+    previewElement.id = 'deposit-order-preview'; previewElement.setAttribute('role', 'tooltip');
+    previewElement.innerHTML = `<strong>訂單商品</strong><ul>${(order.order_items || []).map((item) => `<li>${esc(item.product_name)} × ${Number(item.quantity)}</li>`).join('') || '<li>此訂單沒有商品</li>'}</ul>`;
+    document.body.append(previewElement); link.setAttribute('aria-describedby', previewElement.id);
+    positionOrderPreview(x, y);
+  }
+
+  function positionOrderPreview(x, y) {
+    if (!previewElement) return;
+    const width = previewElement.offsetWidth, height = previewElement.offsetHeight;
+    previewElement.style.left = `${Math.max(8, Math.min(x + 14, innerWidth - width - 8))}px`;
+    previewElement.style.top = `${Math.max(8, y + height + 14 > innerHeight ? y - height - 14 : y + 14)}px`;
+  }
+
+  function bindOrderPreviews() {
+    previewController?.abort(); hideOrderPreview();
+    previewController = new AbortController();
+    const signal = previewController.signal;
+    window.addEventListener('scroll', hideOrderPreview, { signal, capture: true, passive: true });
+    window.addEventListener('resize', hideOrderPreview, { signal });
+    window.addEventListener('blur', hideOrderPreview, { signal });
+    document.querySelectorAll('[data-deposit-order]').forEach((link) => {
+      let start = null, suppressClick = false;
+      link.addEventListener('pointerenter', (event) => {
+        if (event.pointerType === 'mouse') showOrderPreview(link, event.clientX, event.clientY);
+      }, { signal });
+      link.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'mouse') return;
+        hideOrderPreview(); suppressClick = false;
+        start = { x: event.clientX, y: event.clientY };
+        previewTimer = setTimeout(() => { suppressClick = true; showOrderPreview(link, start.x, start.y); }, 450);
+      }, { signal });
+      link.addEventListener('pointermove', (event) => {
+        if (event.pointerType === 'mouse') { positionOrderPreview(event.clientX, event.clientY); return; }
+        if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) {
+          suppressClick = true; start = null; hideOrderPreview();
+        }
+      }, { signal });
+      link.addEventListener('pointerleave', () => { if (start) suppressClick = true; start = null; hideOrderPreview(); }, { signal });
+      link.addEventListener('pointerup', () => { start = null; hideOrderPreview(); }, { signal });
+      link.addEventListener('pointercancel', () => { suppressClick = true; start = null; hideOrderPreview(); }, { signal });
+      link.addEventListener('contextmenu', (event) => { if (start || suppressClick) event.preventDefault(); }, { signal });
+      link.addEventListener('focus', () => { const rect = link.getBoundingClientRect(); showOrderPreview(link, rect.left, rect.bottom); }, { signal });
+      link.addEventListener('blur', hideOrderPreview, { signal });
+      link.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideOrderPreview(); }, { signal });
+      link.addEventListener('click', (event) => {
+        event.preventDefault(); hideOrderPreview();
+        if (suppressClick) { suppressClick = false; return; }
+        openOrder?.(link.dataset.depositOrder);
+      }, { signal });
+    });
+  }
 
   async function load() {
     if (!state.user || !['admin', 'owner'].includes(state.profile?.role)) { ready = false; refunds = []; return; }
@@ -37,14 +102,14 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
   function panel() {
     const header = `<div class="section-head"><div><span class="eyebrow">DEPOSIT MANAGEMENT</span><h2>訂金管理</h2><p>按收件人彙整訂金來源與退款紀錄；訂金只作備註，不參與訂單或分潤計算。</p></div></div><div class="sub-tabs"><button data-deposit-view="received" class="${view === 'received' ? 'active' : ''}">已收訂金</button><button data-deposit-view="refunded" class="${view === 'refunded' ? 'active' : ''}">已退訂金</button></div>`;
     if (!ready || !state.depositReady) return `<section class="panel">${header}<div class="empty">請先在 Supabase 執行 order_deposit_upgrade.sql 啟用訂金管理。</div></section>`;
-    if (view === 'received') return `<section class="panel">${header}<div class="deposit-groups">${receivedGroups().map((group) => `<article class="deposit-group"><div><h3>${esc(group.recipient)}</h3>${group.phone ? `<small>${esc(group.phone)}</small>` : ''}<div class="deposit-sources">${group.orders.map((order) => `<div class="deposit-source"><p><span>${esc(order.number)}</span><strong>${money(order.original)}</strong></p>${order.amount !== order.original ? `<small>可退餘額 ${money(order.amount)}</small>` : ''}${order.note ? `<small>備註：${esc(order.note)}</small>` : ''}${order.deduction ? `<small>商品內扣 ${money(order.deduction)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><span>訂金來源 ${group.orders.length} 筆</span><strong>總訂金 ${money(group.received)}</strong>${group.deducted ? `<span>已內扣 ${money(group.deducted)}</span>` : ''}<strong>可退訂金 ${money(group.total)}</strong><button class="btn btn-primary" data-deposit-refund="${esc(group.key)}" ${group.total > 0 ? '' : 'disabled'}>退訂</button></div></article>`).join('') || '<div class="empty">目前沒有未退的訂金</div>'}</div></section>`;
+    if (view === 'received') return `<section class="panel">${header}<div class="deposit-groups">${receivedGroups().map((group) => `<article class="deposit-group"><div><h3>${esc(group.recipient)}</h3>${group.phone ? `<small>${esc(group.phone)}</small>` : ''}<div class="deposit-sources">${group.orders.map((order) => `<div class="deposit-source"><p><a class="deposit-order-link" data-deposit-order="${esc(order.id)}" href="#order-${esc(order.id)}">${esc(order.number)}</a><strong>${money(order.original)}</strong></p>${order.amount !== order.original ? `<small>可退餘額 ${money(order.amount)}</small>` : ''}${order.note ? `<small>備註：${esc(order.note)}</small>` : ''}${order.deduction ? `<small>商品內扣 ${money(order.deduction)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><span>訂金來源 ${group.orders.length} 筆</span><strong>總訂金 ${money(group.received)}</strong>${group.deducted ? `<span>已內扣 ${money(group.deducted)}</span>` : ''}<strong>可退訂金 ${money(group.total)}</strong><button class="btn btn-primary" data-deposit-refund="${esc(group.key)}" ${group.total > 0 ? '' : 'disabled'}>退訂</button></div></article>`).join('') || '<div class="empty">目前沒有未退的訂金</div>'}</div></section>`;
     const batches = new Map();
     refunds.forEach((refund) => {
       if (!batches.has(refund.batch_id)) batches.set(refund.batch_id, { ...refund, orders: [], total: 0 });
       const batch = batches.get(refund.batch_id);
       batch.orders.push(refund); batch.total += Number(refund.amount);
     });
-    return `<section class="panel">${header}<div class="deposit-groups">${[...batches.values()].map((batch) => `<article class="deposit-group"><div><h3>${esc(batch.recipient_name)}</h3>${batch.phone ? `<small>${esc(batch.phone)}</small>` : ''}<div class="deposit-sources">${batch.orders.map((order) => `<div class="deposit-source"><p><span>${esc(order.order_number)}</span><strong>${money(order.amount)}</strong></p>${state.orders.find((entry) => entry.id === order.order_id)?.deposit_note ? `<small>備註：${esc(state.orders.find((entry) => entry.id === order.order_id).deposit_note)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><strong>已退 ${money(batch.total)}</strong><span>退款日期 ${esc(batch.refund_date)}</span><span>退款來源 ${esc(batch.refund_source)}</span>${batch.refund_account ? `<span>退款帳戶 ${esc(batch.refund_account)}</span>` : ''}</div></article>`).join('') || '<div class="empty">目前沒有退款紀錄</div>'}</div></section>`;
+    return `<section class="panel">${header}<div class="deposit-groups">${[...batches.values()].map((batch) => `<article class="deposit-group deposit-group--refunded"><div><h3>${esc(batch.recipient_name)}</h3>${batch.phone ? `<small>${esc(batch.phone)}</small>` : ''}<div class="deposit-sources">${batch.orders.map((order) => `<div class="deposit-source"><p><span>${esc(order.order_number)}</span><strong>${money(order.amount)}</strong></p>${state.orders.find((entry) => entry.id === order.order_id)?.deposit_note ? `<small>備註：${esc(state.orders.find((entry) => entry.id === order.order_id).deposit_note)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><strong>已退 ${money(batch.total)}</strong><span>退款日期 ${esc(batch.refund_date)}</span><span>退款來源 ${esc(batch.refund_source)}</span>${batch.refund_account ? `<span>退款帳戶 ${esc(batch.refund_account)}</span>` : ''}</div></article>`).join('') || '<div class="empty">目前沒有退款紀錄</div>'}</div></section>`;
   }
 
   function modal() {
@@ -74,6 +139,7 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
   }
 
   function bind() {
+    bindOrderPreviews();
     document.querySelectorAll('[data-deposit-view]').forEach((button) => button.addEventListener('click', () => { view = button.dataset.depositView; render(); }));
     document.querySelectorAll('[data-deposit-refund]').forEach((button) => button.addEventListener('click', () => {
       selected = receivedGroups().find((group) => group.key === button.dataset.depositRefund) || null;
