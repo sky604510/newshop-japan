@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createProfitSharing } from './profit-sharing.js?v=8';
+import { createProfitSharing } from './profit-sharing.js?v=9';
 import { createDepositManagement } from './deposit-management.js?v=4';
 
 const supabase = createClient(
@@ -21,7 +21,7 @@ const state = {
   authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, shipmentView: 'pending',
   procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), shipmentRecipientSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true,
   operationsReady: true, costReady: true, pricingReady: true, adminOpsReady: true, orderEditorReady: true, sortingReady: true,
-  fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, orderCostOverrideReady: true, shipmentBusy: false, depositReady: true, depositDetailsReady: true,
+  fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, shipmentReconciliationReady: true, orderCostOverrideReady: true, shipmentBusy: false, depositReady: true, depositDetailsReady: true,
 };
 
 const money = (value) => `NT$ ${Number(value || 0).toLocaleString('zh-TW')}`;
@@ -151,7 +151,11 @@ async function loadProcurementChecks() {
 
 async function loadFulfillmentChecks() {
   if (!state.user || !isManager()) return;
-  let result = await supabase.from('order_item_fulfillments').select('order_item_id,purchase_confirmed,shipped_at,completed_at,updated_at');
+  let result = await supabase.from('order_item_fulfillments').select('order_item_id,purchase_confirmed,shipped_at,completed_at,reconciled_at,updated_at');
+  state.shipmentReconciliationReady = !result.error;
+  if (result.error && /reconciled_at/i.test(result.error.message || '')) {
+    result = await supabase.from('order_item_fulfillments').select('order_item_id,purchase_confirmed,shipped_at,completed_at,updated_at');
+  }
   if (result.error && /completed_at/i.test(result.error.message || '')) {
     state.shipmentCompletionReady = false;
     result = await supabase.from('order_item_fulfillments').select('order_item_id,purchase_confirmed,shipped_at,updated_at');
@@ -376,7 +380,7 @@ function shipmentSummaries(view = 'pending') {
   for (const order of state.orders.filter((entry) => entry.status !== 'cancelled')) {
     const orderItems = (order.order_items || []).filter((item) => {
       const fulfillment = state.fulfillmentChecks.get(item.id);
-      const stage = !fulfillment?.shipped_at ? 'pending' : fulfillment.completed_at ? 'completed' : 'shipped';
+      const stage = !fulfillment?.shipped_at ? 'pending' : fulfillment.completed_at ? (fulfillment.reconciled_at ? 'completed' : 'awaiting') : 'shipped';
       return stage === view;
     });
     if (!orderItems.length) continue;
@@ -515,7 +519,7 @@ function adminView() {
   const shipmentSelectedCount = selectedShipmentRecipients().reduce((sum, recipient) => sum + recipient.items.length, 0);
   const shipmentRows = shipments.map((recipient) => {
 
-    return `<tr><td>${state.shipmentView === 'shipped' ? `<label class="shipment-recipient-check"><input data-complete-recipient="${esc(recipient.key)}" type="checkbox" aria-label="選取 ${esc(recipient.recipient)} 移至已完成" ${state.shipmentRecipientSelection.has(recipient.key) ? 'checked' : ''} ${state.shipmentCompletionReady ? '' : 'disabled'}/><strong>${esc(recipient.recipient)}</strong></label><button class="btn btn-light shipment-snapshot" type="button" data-shipment-snapshot="${esc(recipient.key)}">快照</button>` : `<strong>${esc(recipient.recipient)}</strong>`}<small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}${shipmentDepositInfo(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentView)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td>${state.shipmentView === 'pending' ? '' : `<td>${state.shipmentView === 'shipped' ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<div class="shipment-date-controls">${shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label><span>${esc(item.name)}・${esc(item.shipped_at || '')}</span></label>`).join('')}</div>`).join('')}</div><button class="btn btn-light shipment-uncomplete" data-uncomplete-recipient="${esc(recipient.key)}" ${state.shipmentCompletionReady ? '' : 'disabled'}>還原至已發貨</button>`}</td>`}</tr>`;
+    return `<tr><td>${state.shipmentView === 'shipped' ? `<label class="shipment-recipient-check"><input data-complete-recipient="${esc(recipient.key)}" type="checkbox" aria-label="選取 ${esc(recipient.recipient)} 移至待收款" ${state.shipmentRecipientSelection.has(recipient.key) ? 'checked' : ''} ${state.shipmentCompletionReady ? '' : 'disabled'}/><strong>${esc(recipient.recipient)}</strong></label><button class="btn btn-light shipment-snapshot" type="button" data-shipment-snapshot="${esc(recipient.key)}">快照</button>` : `<strong>${esc(recipient.recipient)}</strong>`}<small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}${shipmentDepositInfo(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentView)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td>${state.shipmentView === 'pending' ? '' : `<td>${state.shipmentView === 'shipped' ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<div class="shipment-date-controls">${shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label><span>${esc(item.name)}・${esc(item.shipped_at || '')}</span></label>`).join('')}</div>`).join('')}</div>${state.shipmentView === 'awaiting' ? `<button class="btn btn-primary" data-reconcile-recipient="${esc(recipient.key)}" ${state.shipmentReconciliationReady ? '' : 'disabled'}>對帳完成</button><button class="btn btn-light shipment-uncomplete" data-uncomplete-recipient="${esc(recipient.key)}" ${state.shipmentCompletionReady ? '' : 'disabled'}>還原至發貨中</button>` : `<button class="btn btn-light shipment-uncomplete" data-unreconcile-recipient="${esc(recipient.key)}" ${state.shipmentReconciliationReady ? '' : 'disabled'}>還原至待收款</button>`}`}</td>`}</tr>`;
   }).join('');
   const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}${row.deduction ? `<small>已扣商品內扣 ${money(row.deduction)}</small>` : ''}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}${state.fulfillmentReady && !state.shipmentCompletionReady ? `<div class="setup-notice">請執行 <strong>shipment_completion_upgrade.sql</strong>，才能使用已完成及還原功能；原有發貨歷史仍保留在已發貨。</div>` : ''}`;
@@ -523,11 +527,11 @@ function adminView() {
   const orderPanel = `<section class="panel order-panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史清單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整訂單 →</div><div class="table-wrap order-table-wrap"><table class="admin-table order-management-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>訂金備註</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
   const procurementTabs = `<div class="sub-tabs procurement-tabs"><button class="${!state.procurementHistory ? 'active' : ''}" data-procurement-history="current">待採購</button><button class="${state.procurementHistory ? 'active' : ''}" data-procurement-history="history">採購歷史</button></div>`;
   const summaryPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">PURCHASE SUMMARY</span><h2>各賣場採購統計</h2><p>勾選完成後會移入採購歷史，可隨時取消勾選移回。</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div>${procurementTabs}<div class="admin-stats procurement-stats"><div class="stat"><small>本頁商品總數</small><strong>${summaryQuantity}</strong></div><div class="stat"><small>${state.procurementHistory ? '本頁已完成品項' : '本頁尚未完成品項'}</small><strong>${visibleSummaryRows.length}</strong></div><div class="stat"><small>本頁訂單獲利</small><strong>${money(summaryProfit)}</strong></div></div><div class="summary-grid">${summaryHtml}</div></section>`;
-  const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><div class="shipment-header-actions">${state.shipmentView === 'pending' ? `<button class="btn btn-primary shipment-send" data-ship-selected ${shipmentSelectedCount && state.fulfillmentReady && !state.shipmentBusy ? '' : 'disabled'}>${state.shipmentBusy ? '發貨中…' : `發貨（${shipmentSelectedCount}）`}</button>` : ''}<button class="btn btn-primary" data-action="export-shipment">下載 Excel 報表</button></div></div><div class="sub-tabs"><button class="${state.shipmentView === 'pending' ? 'active' : ''}" data-shipment-view="pending">待發貨</button><button class="${state.shipmentView === 'shipped' ? 'active' : ''}" data-shipment-view="shipped">已發貨</button><button class="${state.shipmentView === 'completed' ? 'active' : ''}" data-shipment-view="completed" ${state.shipmentCompletionReady ? '' : 'disabled'}>已完成</button></div>${state.shipmentView === 'shipped' ? `<div class="shipment-bulk-actions"><button class="btn btn-primary" data-complete-selected ${state.shipmentRecipientSelection.size && state.shipmentCompletionReady ? '' : 'disabled'}>將選取的收件人移至已完成${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}</button></div>` : ''}${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th>${state.shipmentView === 'pending' ? '' : `<th>${state.shipmentView === 'shipped' ? '發貨日期' : '發貨日期／操作'}</th>`}</tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentView === 'pending' ? '目前沒有待發貨商品' : state.shipmentView === 'shipped' ? '目前沒有已發貨商品' : '目前沒有已完成商品'}</div>`}</section>`;
+  const shipmentPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">SHIPMENT LIST</span><h2>發貨清單</h2><p>依收件人彙整，並在收件人內依不同訂單顯示細項與小計。</p></div><div class="shipment-header-actions">${state.shipmentView === 'pending' ? `<button class="btn btn-primary shipment-send" data-ship-selected ${shipmentSelectedCount && state.fulfillmentReady && !state.shipmentBusy ? '' : 'disabled'}>${state.shipmentBusy ? '發貨中…' : `發貨（${shipmentSelectedCount}）`}</button>` : ''}<button class="btn btn-primary" data-action="export-shipment">下載 Excel 報表</button></div></div><div class="sub-tabs"><button class="${state.shipmentView === 'pending' ? 'active' : ''}" data-shipment-view="pending">待發貨</button><button class="${state.shipmentView === 'shipped' ? 'active' : ''}" data-shipment-view="shipped">發貨中</button><button class="${state.shipmentView === 'awaiting' ? 'active' : ''}" data-shipment-view="awaiting" ${state.shipmentCompletionReady ? '' : 'disabled'}>待收款</button><button class="${state.shipmentView === 'completed' ? 'active' : ''}" data-shipment-view="completed" ${state.shipmentReconciliationReady ? '' : 'disabled'}>已完成</button></div>${state.shipmentView === 'shipped' ? `<div class="shipment-bulk-actions"><button class="btn btn-primary" data-complete-selected ${state.shipmentRecipientSelection.size && state.shipmentCompletionReady ? '' : 'disabled'}>將選取的收件人移至待收款${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}</button></div>` : ''}${shipments.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整發貨資料 →</div><div class="table-wrap"><table class="admin-table shipment-table"><thead><tr><th>收件人／下單帳號</th><th>訂單與商品細項</th><th>總數量</th><th>總金額</th><th>總獲利</th>${state.shipmentView === 'pending' ? '' : `<th>${state.shipmentView === 'shipped' ? '發貨日期' : '發貨日期／操作'}</th>`}</tr></thead><tbody>${shipmentRows}</tbody></table></div>` : `<div class="empty">${state.shipmentView === 'pending' ? '目前沒有待發貨商品' : state.shipmentView === 'shipped' ? '目前沒有發貨中商品' : state.shipmentView === 'awaiting' ? '目前沒有待收款商品' : '目前沒有已完成商品'}</div>`}</section>`;
   const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>只有收件人為必填，信箱與電話皆可留空。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>信箱（選填）</th><th>電話（選填）</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
   const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>拖曳調整同一區內的順序；可同時置頂多個賣場。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table market-sort-table"><thead><tr><th>排序</th><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody id="market-sort-list">${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
   const panels = { orders: orderPanel, summary: summaryPanel, profits: state.adminTab === 'profits' ? profitSharing.panel() : '', shipments: shipmentPanel, deposits: state.adminTab === 'deposits' ? depositManagement.panel() : '', customers: customerPanel, markets: marketPanel };
-  return `<main class="admin-page">${migrationNotice}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購清單</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'profits' ? 'active' : ''}" data-admin-tab="profits">分潤清單</button><button class="${state.adminTab === 'deposits' ? 'active' : ''}" data-admin-tab="deposits">訂金管理</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
+  return `<main class="admin-page">${migrationNotice}${state.shipmentReconciliationReady ? '' : '<div class="setup-notice">請執行 shipment_reconciliation_upgrade.sql 啟用待收款、對帳完成與分潤流程。</div>'}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購清單</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'deposits' ? 'active' : ''}" data-admin-tab="deposits">訂金管理</button><button class="${state.adminTab === 'profits' ? 'active' : ''}" data-admin-tab="profits">分潤清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div>${panels[state.adminTab] || marketPanel}</main>`;
 }
 
 function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
@@ -1436,7 +1440,7 @@ async function shipSelectedItems() {
   const recipients = selectedShipmentRecipients();
   const itemIds = recipients.flatMap((recipient) => recipient.items.map((item) => item.id));
   if (!itemIds.length) { renderToast('請先勾選要發貨的商品'); return; }
-  if (!window.confirm(`確定將 ${recipients.length} 位收件人的 ${itemIds.length} 個勾選品項移入已發貨嗎？`)) return;
+  if (!window.confirm(`確定將 ${recipients.length} 位收件人的 ${itemIds.length} 個勾選品項移入發貨中嗎？`)) return;
   state.shipmentBusy = true; updateShipmentSendButton();
   let shipped = false;
   try {
@@ -1444,13 +1448,13 @@ async function shipSelectedItems() {
     if (error) throw error;
     shipped = true;
     itemIds.forEach((id) => state.shipmentSelection.delete(id));
-    await loadFulfillmentChecks(); render(); renderToast(`已將 ${itemIds.length} 個品項移入已發貨`);
+    await loadFulfillmentChecks(); render(); renderToast(`已將 ${itemIds.length} 個品項移入發貨中`);
   } catch (error) { renderToast(shipped ? `發貨已儲存，清單載入失敗，請重新整理：${friendlyError(error)}` : friendlyError(error)); }
   finally { state.shipmentBusy = false; updateShipmentSendButton(); }
 }
 
 async function setShipmentCompleted(recipientKeys, completed) {
-  const recipients = shipmentSummaries(completed ? 'shipped' : 'completed').filter((entry) => recipientKeys.includes(entry.key));
+  const recipients = shipmentSummaries(completed ? 'shipped' : 'awaiting').filter((entry) => recipientKeys.includes(entry.key));
   if (!recipients.length) return;
   const itemCount = recipients.reduce((sum, entry) => sum + entry.items.length, 0);
   const ids = recipients.flatMap((recipient) => recipient.items.map((item) => item.id));
@@ -1459,12 +1463,27 @@ async function setShipmentCompleted(recipientKeys, completed) {
     try { warning = await profitSharing.restoreWarning(ids); }
     catch (error) { renderToast(friendlyError(error)); return; }
   }
-  if (!window.confirm(`${warning.message ? `${warning.message}\n\n` : ''}確定將 ${recipients.length} 位收件人的 ${itemCount} 個品項${completed ? '移至已完成' : '還原至已發貨'}嗎？`)) return;
+  if (!window.confirm(`${warning.message ? `${warning.message}\n\n` : ''}確定將 ${recipients.length} 位收件人的 ${itemCount} 個品項${completed ? '移至待收款' : '還原至發貨中'}嗎？`)) return;
   const { error } = await supabase.rpc('admin_set_shipment_items_completed', {
     p_order_item_ids: ids, p_completed: completed, ...(warning.count ? { p_acknowledge_profit_share: true } : {}),
   });
   if (error) { renderToast(friendlyError(error)); await loadFulfillmentChecks(); render(); return; }
-  await loadFulfillmentChecks(); render(); renderToast(completed ? '已移入已完成' : '已還原至已發貨');
+  await loadFulfillmentChecks(); render(); renderToast(completed ? '已移入待收款' : '已還原至發貨中');
+}
+
+async function reconcileShipment(recipientKeys, reconciled = true) {
+  const recipients = shipmentSummaries(reconciled ? 'awaiting' : 'completed').filter((entry) => recipientKeys.includes(entry.key));
+  const ids = recipients.flatMap((recipient) => recipient.items.map((item) => item.id));
+  if (!ids.length || !state.shipmentReconciliationReady) return;
+  let warning = { count: 0, message: '' };
+  if (!reconciled) {
+    try { warning = await profitSharing.restoreWarning(ids); }
+    catch (error) { renderToast(friendlyError(error)); return; }
+  }
+  if (!window.confirm(`${warning.message ? `${warning.message}\n\n` : ''}${reconciled ? '確認已收到款項並完成對帳，移至已完成' : '還原至待收款'}？`)) return;
+  const { error } = await supabase.rpc('admin_reconcile_shipment_items', { p_order_item_ids: ids, p_reconciled: reconciled, p_acknowledge_profit_share: Boolean(warning.count) });
+  if (error) { renderToast(friendlyError(error)); return; }
+  await loadFulfillmentChecks(); render(); renderToast(reconciled ? '對帳完成，已移入已完成' : '已還原至待收款');
 }
 
 async function updateShipmentDate(orderItemId, shippedAt) {
@@ -1484,7 +1503,7 @@ async function restoreShipmentItem(orderItemId) {
   const { error } = await supabase.rpc('admin_restore_order_item', { p_order_item_id: orderItemId, ...(warning.count ? { p_acknowledge_profit_share: true } : {}) });
   if (error) { renderToast(friendlyError(error)); return; }
   const current = state.fulfillmentChecks.get(orderItemId) || { order_item_id: orderItemId, purchase_confirmed: false };
-  state.fulfillmentChecks.set(orderItemId, { ...current, shipped_at: null, completed_at: null });
+  state.fulfillmentChecks.set(orderItemId, { ...current, shipped_at: null, completed_at: null, reconciled_at: null });
   render(); renderToast('商品已還原至待發貨清單');
 }
 
@@ -1759,7 +1778,7 @@ async function openStatementSnapshot(key, button) {
 async function exportShipmentExcel() {
   try {
     const view = state.shipmentView;
-    const label = { pending: '待發貨清單', shipped: '已發貨清單', completed: '已完成清單' }[view];
+    const label = { pending: '待發貨清單', shipped: '發貨中清單', awaiting: '待收款清單', completed: '已完成清單' }[view];
     const XLSX = view === 'shipped' ? await loadStyledShipmentXlsx() : await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
     const workbook = XLSX.utils.book_new();
     const recipients = shipmentSummaries(view);
@@ -1892,10 +1911,12 @@ function bind() {
     if (input.checked) state.shipmentRecipientSelection.add(input.dataset.completeRecipient); else state.shipmentRecipientSelection.delete(input.dataset.completeRecipient);
     const button = document.querySelector('[data-complete-selected]');
     button.disabled = !state.shipmentRecipientSelection.size;
-    button.textContent = `將選取的收件人移至已完成${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}`;
+    button.textContent = `將選取的收件人移至待收款${state.shipmentRecipientSelection.size ? `（${state.shipmentRecipientSelection.size}）` : ''}`;
   }));
   document.querySelector('[data-complete-selected]')?.addEventListener('click', () => setShipmentCompleted([...state.shipmentRecipientSelection], true));
   document.querySelectorAll('[data-uncomplete-recipient]').forEach((button) => button.addEventListener('click', () => setShipmentCompleted([button.dataset.uncompleteRecipient], false)));
+  document.querySelectorAll('[data-reconcile-recipient]').forEach((button) => button.addEventListener('click', () => reconcileShipment([button.dataset.reconcileRecipient])));
+  document.querySelectorAll('[data-unreconcile-recipient]').forEach((button) => button.addEventListener('click', () => reconcileShipment([button.dataset.unreconcileRecipient], false)));
   document.querySelectorAll('[data-shipment-select]').forEach((input) => input.addEventListener('change', () => toggleShipmentSelection(input.dataset.shipmentSelect, input.checked)));
   document.querySelector('[data-ship-selected]')?.addEventListener('click', shipSelectedItems);
   document.querySelectorAll('[data-shipment-date]').forEach((input) => input.addEventListener('change', () => updateShipmentDate(input.dataset.shipmentDate, input.value)));

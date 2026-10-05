@@ -64,8 +64,10 @@ test('拒絕未入帳、無效比例與無效額外成本', () => {
 });
 test('來源只限發貨已完成：排除待發貨、僅已發貨、取消與已分潤品項', () => {
   const orders = [{ id:'order',status:'confirmed',order_items:['pending','shipped','completed','settled','completed-again'].map(id=>({...item,id,product_id:'same-product'})) },{status:'cancelled',order_items:[{...item,id:'cancelled'}]}];
-  const checks = new Map([['shipped',{shipped_at:'2026-10-01'}],...['completed','settled','completed-again','cancelled'].map(id=>[id,{shipped_at:'2026-10-01',completed_at:'2026-10-02'}])]);
+  const checks = new Map([['shipped',{shipped_at:'2026-10-01'}],...['completed','settled','completed-again','cancelled'].map(id=>[id,{shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:'2026-10-02'}])]);
   assert.deepEqual(completedProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).map(entry=>entry.id),['completed','completed-again']);
+  checks.get('completed').reconciled_at=null;
+  assert.deepEqual(completedProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).map(entry=>entry.id),['completed-again'],'Awaiting payment is excluded until reconciliation');
   checks.get('completed').completed_at=null;
   assert.deepEqual(completedProfitItems(orders,checks,new Set(['settled']),entry=>entry.unit_cost).map(entry=>entry.id),['completed-again']);
 });

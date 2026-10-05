@@ -22,7 +22,7 @@ try {
         orders:[{id:'o1',order_number:'NS-PURCHASE',recipient_name:'測試收件人',status:'confirmed',total_amount:1600,order_items:[{id:'a',product_id:'p1',market_id:'m1',product_name:'已採購未發貨商品',unit_price:1500,unit_cost:1000,quantity:1},{id:'b',product_id:'p2',market_id:'m1',product_name:'未採購已發貨商品',unit_price:100,unit_cost:10,quantity:1}]}],
         procurement_checks:[{product_id:'p1',is_purchased:true},{product_id:'p2',is_purchased:false}],
         product_costs:[{product_id:'p1',cost:1000},{product_id:'p2',cost:10}],
-        order_item_fulfillments:[{order_item_id:'a',shipped_at:'2026-10-01',completed_at:'2026-10-02'},{order_item_id:'a2',shipped_at:'2026-10-01',completed_at:'2026-10-02'},{order_item_id:'b',shipped_at:'2026-10-01'}],
+        order_item_fulfillments:[{order_item_id:'a',shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:'2026-10-02'},{order_item_id:'a2',shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:'2026-10-02'},{order_item_id:'b',shipped_at:'2026-10-01'}],
         profit_share_settlements:[],customers:[],
       };
       tables.orders.push({id:'o2',order_number:'NS-SECOND',recipient_name:'另一收件人',phone:'',status:'confirmed',total_amount:2800,order_items:[{id:'a2',product_id:'p1',market_id:'m1',product_name:'已採購未發貨商品',unit_price:1400,unit_cost:800,quantity:2}]});
@@ -93,7 +93,7 @@ try {
     await page.waitForFunction(()=>document.querySelector('[data-procurement-product="p1"]')===null);
     await page.locator('[data-admin-tab="profits"]').click();
     assert.equal(await page.locator('[data-profit-product]').count(),1,'Undo purchase does not affect completed shipment source');
-    await page.evaluate(()=>window.purchaseFixture.tables.order_item_fulfillments.forEach(item=>{item.completed_at=null;}));
+    await page.evaluate(()=>window.purchaseFixture.tables.order_item_fulfillments.forEach(item=>{item.completed_at=null;item.reconciled_at=null;}));
     await page.locator('[data-admin-tab="summary"]').click();
     await page.locator('[data-admin-tab="profits"]').click();
     assert.equal(await page.locator('[data-profit-product]').count(),0,'Undo shipment completion removes item from pending sharing');
