@@ -6,14 +6,22 @@ const parties = [{ name: '我', ratio: 50 }, { name: '老婆', ratio: 50 }];
 const item = { id: 'a', quantity: 1, unit_price: 1500, unit_cost: 1000 };
 const settings = { parties, collector: 1, received: 1500, receivedConfirmed: true, payers: { a: 0 }, expenses: [{ description: '集運', amount: 100, payer: 1 }] };
 
-test('依賣場商品合併不同訂單：數量、成本、售價、內扣與獲利保持原始金額', () => {
+test('依賣場商品合併不同訂單：訂金內扣不減少商品獲利', () => {
   const product={id:'p',name:'商品',foreign_cost:400,exchange_rate:0.2};
   const rows=procurementProfitGroups([{...item,product_id:'p',buyer_key:'buyer1',deduction:100},{...item,id:'b',product_id:'p',quantity:2,unit_price:1400,unit_cost:800,buyer_key:'buyer2',deduction:0}],[{id:'m',name:'賣場',products:[product]}]);
   assert.equal(rows.length,1);assert.equal(rows[0].rows.length,1);
   const row=rows[0].rows[0];
   assert.equal(row.quantity,3);assert.equal(row.totalCost,2600);assert.equal(row.revenue,4300);
-  assert.equal(row.cost,867);assert.equal(row.buyers,2);assert.equal(row.profit,1600);
+  assert.equal(row.cost,867);assert.equal(row.buyers,2);assert.equal(row.profit,1700);
   assert.deepEqual(row.items.map(item=>item.id),['a','b']);
+});
+
+test('850 元商品全額抵用訂金，零成本獲利仍是 850 元', () => {
+  const goods = [{ ...item, product_id:'p', unit_price:850, unit_cost:0, deduction:850 }];
+  assert.equal(procurementProfitGroups(goods)[0].rows[0].profit,850);
+  const result = calculateProfitShare(goods,{...settings,received:850,expenses:[]});
+  assert.equal(result.revenue,850);assert.equal(result.profit,850);
+  assert.deepEqual(result.parties.map(party=>party.share),[425,425]);
 });
 
 test('整數比例平均分配：第一位優先補差值', () => {

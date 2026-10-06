@@ -26,6 +26,7 @@ try {
         profit_share_settlements:[],customers:[],
       };
       tables.orders.push({id:'o2',order_number:'NS-SECOND',recipient_name:'另一收件人',phone:'',status:'confirmed',total_amount:2800,order_items:[{id:'a2',product_id:'p1',market_id:'m1',product_name:'已採購未發貨商品',unit_price:1400,unit_cost:800,quantity:2}]});
+      Object.assign(tables.orders[0],{deposit_amount:500,deposit_deduction:500,total_amount:1100});
       const createClient=()=>({auth:{onAuthStateChange(){}},rpc:async(name,args)=>{
         if(name !== 'admin_set_procurement_cost_people') throw Error('Unexpected RPC');
         args.p_records.forEach(row=>Object.assign(tables.procurement_checks.find(entry=>entry.product_id===row.product_id),row)); return {error:null};
@@ -66,6 +67,8 @@ try {
     await page.locator('[data-profit-product="p1"]').waitFor();
     const profitRows = await page.locator('[data-profit-product="p1"]').evaluate(el=>[...el.closest('tr').querySelectorAll('td')].slice(1).map(td=>td.textContent));
     assert.deepEqual(profitRows,historyRows,'Market/product statistics match procurement history');
+    assert.doesNotMatch(profitRows.join(''),/已扣商品內扣/);
+    assert.match(profitRows.at(-1),/NT\$ 1,700/,'Deposit offsets do not reduce merchandise profit');
     assert.equal(await page.locator('[data-profit-product="p1"]').count(),1,'Same product from two orders appears as one row');
     assert.equal(await page.locator('.profit-market-list [data-profit-order]').count(),0);
     await page.screenshot({path:join(output,`market-selection-${width}.png`),fullPage:true});
@@ -74,12 +77,14 @@ try {
     assert.equal(await page.locator('[data-procurement-history]').count(),0);
     await page.locator('[data-profit-product="p1"]').check();
     assert.match(await page.locator('[data-profit-selection]').textContent(), /1 個商品・3 件/);
+    assert.match(await page.locator('[data-profit-selection]').textContent(), /NT\$ 4,300/,'Selection total includes already received deposits');
     assert.equal(await page.locator('[data-profit-market="m1"]').isChecked(),true);
     await page.locator('[data-profit-market="m1"]').uncheck();
     assert.equal(await page.locator('[data-profit-next]').isDisabled(),true);
     await page.locator('[data-profit-market="m1"]').check();
     assert.equal(await page.locator('[data-profit-product="p1"]').isChecked(),true);
     await page.locator('[data-profit-next]').click();
+    assert.equal(await page.locator('[data-profit-received]').inputValue(),'4300','Default settlement receipts do not subtract deposits');
     await page.locator('[data-profit-title]').fill('保留草稿');
     await page.locator('[data-profit-confirmed]').check();
     await page.locator('[data-profit-calculate]').click();
