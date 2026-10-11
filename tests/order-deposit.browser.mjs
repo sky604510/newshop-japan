@@ -159,10 +159,18 @@ try {
       CanvasRenderingContext2D.prototype.fillText = function (text, ...args) { drawn.push(String(text)); return original.call(this, text, ...args); };
       try { await statementSnapshotCanvas(recipient); }
       finally { CanvasRenderingContext2D.prototype.fillText = original; }
+<<<<<<< HEAD
       return { amount: recipient.amount, deduction: recipient.deduction, drawn };
     });
     assert.equal(snapshot.amount, 900);
     assert.equal(snapshot.deduction, 100);
+=======
+      return { amount: recipient.amount, deduction: recipient.deduction, profit: recipient.profit, drawn };
+    });
+    assert.equal(snapshot.amount, 900);
+    assert.equal(snapshot.deduction, 100);
+    assert.equal(snapshot.profit,700,'Deposit deduction reduces receivables, not merchandise profit');
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
     assert.ok(snapshot.drawn.some((line) => line.includes('測試訂金備註')));
     assert.ok(snapshot.drawn.some((line) => line.includes('總金額 NT$ 900')));
     assert.ok(snapshot.drawn.every((line) => !/NS-1|NS-2/.test(line)), 'Snapshot must not display order numbers');

@@ -1,5 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+<<<<<<< HEAD
 import { createProfitSharing, allocateQuantities, allocationSummary } from './profit-sharing.js?v=10';
+=======
+import { createProfitSharing, allocateQuantities, allocationSummary } from './profit-sharing.js?v=11';
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
 import { createDepositManagement } from './deposit-management.js?v=6';
 
 const supabase = createClient(
@@ -19,7 +23,11 @@ const state = {
   customerDraft: null, checkoutMode: 'general',
   checkoutDraft: JSON.parse(localStorage.getItem('newshop_checkout_draft') || '{}'),
   authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, shipmentView: 'pending',
+<<<<<<< HEAD
   costPeopleReady: true, costPeopleBusy: false, procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), shipmentRecipientSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true, coverLayoutReady: true,
+=======
+  costPeopleReady: true, costPeopleBusy: false, procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), shipmentRecipientSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true,
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
   operationsReady: true, costReady: true, pricingReady: true, adminOpsReady: true, orderEditorReady: true, sortingReady: true,
   fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, shipmentReconciliationReady: true, shipmentBatchReady: true, shipmentBatchNameReady: true, reconciliationBusy: false, orderCostOverrideReady: true, shipmentBusy: false, depositReady: true, depositDetailsReady: true,
 };
@@ -112,11 +120,15 @@ function syncCartWithProducts() {
 
 async function loadMarkets() {
   let marketQuery = await supabase.from('markets')
+<<<<<<< HEAD
     .select('id,slug,name,description,image_url,cover_layout,is_active,is_pinned,sort_order,closes_at,created_at,products(id,market_id,name,description,price,image_url,stock,is_active,sort_order,created_at)');
   state.coverLayoutReady = !marketQuery.error;
   if (marketQuery.error && /cover_layout/i.test(marketQuery.error.message || '')) {
     marketQuery = await supabase.from('markets').select('id,slug,name,description,image_url,is_active,is_pinned,sort_order,closes_at,created_at,products(id,market_id,name,description,price,image_url,stock,is_active,sort_order,created_at)');
   }
+=======
+    .select('id,slug,name,description,image_url,is_active,is_pinned,sort_order,closes_at,created_at,products(id,market_id,name,description,price,image_url,stock,is_active,sort_order,created_at)');
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
   if (marketQuery.error && /is_pinned|sort_order/i.test(marketQuery.error.message || '')) {
     state.sortingReady = false;
     marketQuery = await supabase.from('markets')
@@ -319,7 +331,11 @@ function marketPrice(market) {
 function marketCard(market, index) {
   const items = market.products.filter((item) => item.is_active);
   const cover = market.image_url;
+<<<<<<< HEAD
   const art = cover ? `<img src="${esc(cover)}" alt="${esc(market.name)}" ${market.cover_layout ? `class="cover-adjusted" style="${coverLayoutStyle(market.cover_layout)}"` : ''} />` : `<span class="empty-image" aria-hidden="true"></span>`;
+=======
+  const art = cover ? `<img src="${esc(cover)}" alt="${esc(market.name)}" />` : `<span class="empty-image" aria-hidden="true"></span>`;
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
   const closed = isClosed(market); const soldOut = !items.some((item) => Number(item.stock) > 0);
   const unavailable = soldOut || closed;
   return `<article class="market-card reveal" style="--delay:${Math.min(index * 70, 280)}ms"><button class="market-cover" data-open-market="${market.id}" aria-label="查看 ${esc(market.name)}">${art}<span class="market-arrow">↗</span></button><div class="market-copy"><div class="market-meta"><span>${items.length} 個品項</span><span>${closed ? '已截止' : soldOut ? '已售完' : '開放中'}</span></div><h3>${esc(market.name)}</h3><p>${esc(market.description || '精選限定商品。')}</p>${market.closes_at ? `<div class="deadline">收單至 ${new Date(market.closes_at).toLocaleDateString('zh-TW')}</div>` : ''}<div class="market-bottom"><strong>${marketPrice(market)}</strong><button class="text-link" data-open-market="${market.id}">${unavailable ? (closed ? '已截止・查看商品' : '無庫存・查看商品') : '進入賣場 →'}</button></div></div></article>`;
@@ -370,7 +386,11 @@ function marketSummaries(includeZero = false) {
       const revenue = grossRevenue - deduction;
       const totalCost = itemOrders.reduce((sum, item) => sum + currentOrderItemCost(item) * Number(item.quantity), 0);
       const cost = Math.round(quantity ? totalCost / quantity : currentCost); const price = quantity ? grossRevenue / quantity : Number(product.price || 0);
+<<<<<<< HEAD
       return { product, items: itemOrders, quantity, cost, price, revenue, deduction, totalCost, profit: revenue - totalCost, buyers: new Set(itemOrders.map((item) => item.order.customer_id || item.order.phone)).size, procured: Boolean(state.procurementChecks.get(product.id)?.is_purchased) };
+=======
+      return { product, items: itemOrders, quantity, cost, price, revenue, deduction, totalCost, profit: grossRevenue - totalCost, buyers: new Set(itemOrders.map((item) => item.order.customer_id || item.order.phone)).size, procured: Boolean(state.procurementChecks.get(product.id)?.is_purchased) };
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
     }).filter((row) => includeZero || row.quantity > 0),
   })).filter((entry) => includeZero || entry.rows.length);
 }
@@ -401,9 +421,13 @@ function procurementSubtotalRow(rows) {
   const averageRate = rates.length ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : 0;
   const buyers = rows.reduce((sum, row) => sum + Number(row.buyers), 0);
   const profit = rows.reduce((sum, row) => sum + Number(row.profit), 0);
+<<<<<<< HEAD
   const costTotal = rows.reduce((sum, row) => sum + Number(row.cost) * Number(row.quantity), 0);
   const priceTotal = rows.reduce((sum, row) => sum + Number(row.price) * Number(row.quantity), 0);
   return `<tfoot><tr class="procurement-subtotal"><td></td><td><strong>小計</strong></td><td><strong>${quantity}</strong></td><td>${foreignTotal.toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td><td>${averageRate.toLocaleString('zh-TW', { maximumFractionDigits: 4 })}</td><td><strong>${money(costTotal)}</strong></td><td></td><td><strong>${money(priceTotal)}</strong></td><td><strong>${buyers}</strong></td><td class="profit ${profit < 0 ? 'negative' : ''}"><strong>${money(profit)}</strong></td></tr></tfoot>`;
+=======
+  return `<tfoot><tr class="procurement-subtotal"><td></td><td><strong>小計</strong></td><td><strong>${quantity}</strong></td><td>${foreignTotal.toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td><td>${averageRate.toLocaleString('zh-TW', { maximumFractionDigits: 4 })}</td><td>—</td><td></td><td>—</td><td><strong>${buyers}</strong></td><td class="profit ${profit < 0 ? 'negative' : ''}"><strong>${money(profit)}</strong></td></tr></tfoot>`;
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
 }
 
 function latestCustomerOrder(customer) {
@@ -530,7 +554,11 @@ function shipmentSummaries(view = 'pending', batchId = null) {
     for (const item of orderItems) {
       const fulfillment = state.fulfillmentChecks.get(item.id);
       const product = state.products.find((entry) => entry.id === item.product_id);
+<<<<<<< HEAD
       const unitCost = currentOrderItemCost(item); const quantity = Number(item.quantity); const amount = Number(item.unit_price) * quantity; const deduction = deductionShares.get(item.id) || 0; const profit = amount - deduction - unitCost * quantity;
+=======
+      const unitCost = currentOrderItemCost(item); const quantity = Number(item.quantity); const amount = Number(item.unit_price) * quantity; const deduction = deductionShares.get(item.id) || 0; const profit = amount - unitCost * quantity;
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
       const imageUrl = product?.image_url || '';
       recipient.items.push({ id: item.id, order_id: order.id, order_number: order.order_number, order_note: order.note || '', deposit_amount: Number(order.deposit_amount || 0), deposit_note: order.deposit_note || '', deduction, name: item.product_name, image_url: imageUrl, quantity, amount, profit, shipped_at: fulfillment?.shipped_at || null });
       recipient.amount += amount - deduction; recipient.deduction += deduction; recipient.profit += profit;
@@ -634,7 +662,11 @@ function adminView() {
 
     return `<tr><td>${['shipped', 'awaiting'].includes(state.shipmentView) ? `<label class="shipment-recipient-check"><input ${state.shipmentView === 'awaiting' ? 'data-reconcile-select' : 'data-complete-recipient'}="${esc(recipient.key)}" type="checkbox" aria-label="選取 ${esc(recipient.recipient)} ${state.shipmentView === 'awaiting' ? '對帳完成' : '移至待收款'}" ${state.shipmentRecipientSelection.has(recipient.key) ? 'checked' : ''} ${(state.shipmentView === 'awaiting' ? state.shipmentReconciliationReady && state.shipmentBatchReady && !state.reconciliationBusy : state.shipmentCompletionReady) ? '' : 'disabled'}/><strong>${esc(recipient.recipient)}</strong></label>${state.shipmentView === 'shipped' ? `<button class="btn btn-light shipment-snapshot" type="button" data-shipment-snapshot="${esc(recipient.key)}">快照</button>` : ''}` : `<strong>${esc(recipient.recipient)}</strong>`}<small>${esc(recipient.account)}</small><small>${recipient.phone ? `${esc(recipient.phone)}・` : ''}${esc(recipient.delivery)}</small>${shipmentRecipientNotes(recipient)}${shipmentDepositInfo(recipient)}</td><td><div class="shipment-order-groups">${shipmentOrderDetails(recipient, state.shipmentView)}</div></td><td><strong>${recipient.items.reduce((sum, item) => sum + item.quantity, 0)}</strong></td><td><strong>${money(recipient.amount)}</strong></td><td class="profit ${recipient.profit < 0 ? 'negative' : ''}"><strong>${money(recipient.profit)}</strong></td>${state.shipmentView === 'pending' ? '' : `<td>${state.shipmentView === 'shipped' ? `<div class="shipment-date-controls">${shipmentDateControls(recipient)}</div>` : `<div class="shipment-date-controls">${shipmentOrderGroups(recipient).map((group) => `<div class="shipment-date-group"><strong>${esc(group.order_number)}</strong>${group.items.map((item) => `<label><span>${esc(item.name)}・${esc(item.shipped_at || '')}</span></label>`).join('')}</div>`).join('')}</div>${state.shipmentView === 'awaiting' ? `<button class="btn btn-light shipment-uncomplete" data-uncomplete-recipient="${esc(recipient.key)}" ${state.shipmentCompletionReady ? '' : 'disabled'}>還原至發貨中</button>` : `<button class="btn btn-light shipment-uncomplete" data-unreconcile-recipient="${esc(recipient.key)}" data-reconciliation-batch="${esc(batchId || '')}" ${state.shipmentReconciliationReady ? '' : 'disabled'}>還原至待收款</button>`}`}</td>`}</tr>`;
   }).join('');
+<<<<<<< HEAD
   const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><div class="procurement-head-actions"><label>成本人 <select data-cost-market="${esc(market.id)}" ${state.costPeopleReady && !state.costPeopleBusy ? '' : 'disabled'}><option value="">整個賣場套用…</option><option value="0">豪</option><option value="1">盈</option></select></label><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div></div><div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看成本人與完整商品統計 →</div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>成本人</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${procurementCostControl(row)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}${row.deduction ? `<small>已扣商品內扣 ${money(row.deduction)}</small>` : ''}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
+=======
+  const summaryHtml = summaries.length ? summaries.map(({ market, rows }) => `<article class="summary-card"><div class="summary-head"><h3>${esc(market.name)}</h3><div class="procurement-head-actions"><label>成本人 <select data-cost-market="${esc(market.id)}" ${state.costPeopleReady && !state.costPeopleBusy ? '' : 'disabled'}><option value="">整個賣場套用…</option><option value="0">豪</option><option value="1">盈</option></select></label><span>獲利 ${money(rows.reduce((sum, row) => sum + row.profit, 0))}</span></div></div><div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看成本人與完整商品統計 →</div><div class="table-wrap"><table class="admin-table procurement-table"><thead><tr><th>完成</th><th>商品</th><th>數量</th><th>外幣成本</th><th>匯率</th><th>單件成本</th><th>成本人</th><th>售價</th><th>購買人數</th><th>獲利</th></tr></thead><tbody>${rows.map((row) => `<tr><td><input class="procurement-check" data-procurement-product="${row.product.id}" type="checkbox" ${row.procured ? 'checked' : ''} ${state.adminOpsReady ? '' : 'disabled'}/></td><td><div class="procurement-product"><button class="procurement-thumb image-preview-trigger" data-preview-image="${esc(row.product.image_url || '')}" aria-label="${row.product.image_url ? `放大查看 ${esc(row.product.name)}` : '沒有商品圖片'}" ${row.product.image_url ? '' : 'disabled'}>${row.product.image_url ? `<img src="${esc(row.product.image_url)}" alt="" loading="lazy"/>` : ''}</button><span><strong>${esc(row.product.name)}</strong><small>${esc(market.name)}</small></span></div></td><td><strong>${row.quantity}</strong></td><td>${Number(row.product.foreign_cost || 0).toLocaleString()}</td><td>${Number(row.product.exchange_rate || 0).toLocaleString()}</td><td>${money(row.cost)}</td><td>${procurementCostControl(row)}</td><td>${money(row.price)}</td><td>${row.buyers}</td><td class="profit ${row.profit < 0 ? 'negative' : ''}">${money(row.profit)}</td></tr>`).join('')}</tbody>${procurementSubtotalRow(rows)}</table></div></article>`).join('') : `<div class="empty">${state.procurementHistory ? '目前沒有採購歷史' : '目前沒有待採購商品'}</div>`;
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
   const migrationNotice = `${state.operationsReady ? '' : `<div class="setup-notice">請先執行 <strong>customer_operations_upgrade.sql</strong>。</div>`}${state.costReady ? '' : `<div class="setup-notice">請執行 <strong>product_cost_upgrade.sql</strong>。</div>`}${state.pricingReady ? '' : `<div class="setup-notice">請執行 <strong>order_price_adjustment_upgrade.sql</strong>。</div>`}${state.adminOpsReady ? '' : `<div class="setup-notice">請執行最新的 <strong>admin_operations_upgrade.sql</strong>，才能使用帳號、外幣成本、數量修改、刪除與採購歷史。</div>`}${state.orderEditorReady ? '' : `<div class="setup-notice">請執行 <strong>order_editor_upgrade.sql</strong>，才能在訂單中新增商品。</div>`}${state.sortingReady ? '' : `<div class="setup-notice">請執行 <strong>sorting_upgrade.sql</strong>，才能使用賣場置頂與拖曳排序。</div>`}${state.fulfillmentReady ? '' : `<div class="setup-notice">請執行 <strong>fulfillment_upgrade.sql</strong>，才能保存單品購買確認與發貨歷史。</div>`}${state.shipmentNoteReady ? '' : `<div class="setup-notice">請重新執行最新的 <strong>fulfillment_upgrade.sql</strong>，才能從發貨清單修改訂單備註。</div>`}${state.fulfillmentReady && !state.shipmentCompletionReady ? `<div class="setup-notice">請執行 <strong>shipment_completion_upgrade.sql</strong>，才能使用已完成及還原功能；原有發貨歷史仍保留在已發貨。</div>` : ''}`;
   const orderCostNotice = (state.orderCostOverrideReady ? '' : '<div class="setup-notice">請執行 <strong>order_cost_override_upgrade.sql</strong>，才能保存訂單品項的手動成本。</div>') + (state.depositReady ? '' : '<div class="setup-notice">請執行 <strong>order_deposit_upgrade.sql</strong> 啟用訂金功能；既有訂單與結帳仍可使用。</div>') + (state.depositReady && !state.depositDetailsReady ? '<div class="setup-notice">請執行 <strong>order_deposit_details_upgrade.sql</strong>，啟用訂金備註與商品內扣。</div>' : '');
   const orderPanel = `<section class="panel order-panel"><div class="section-head"><div><span class="eyebrow">ORDERS</span><h2>訂單總覽</h2><p>${esc(state.user?.email)} ・ 完成或取消的訂單會自動移入歷史</p></div><button class="btn btn-primary" data-action="export">下載 Excel 報表</button></div><div class="sub-tabs"><button class="${!state.adminOrderHistory ? 'active' : ''}" data-order-history="current">目前訂單</button><button class="${state.adminOrderHistory ? 'active' : ''}" data-order-history="history">歷史訂單</button></div><div class="admin-stats"><div class="stat"><small>總訂單</small><strong>${state.orders.length}</strong></div><div class="stat"><small>待處理</small><strong>${state.orders.filter((order) => order.status === 'pending').length}</strong></div><div class="stat"><small>有效訂單總額</small><strong>${money(total)}</strong></div></div>${viewingOrders.length ? `<div class="mobile-table-hint" aria-hidden="true">← 左右滑動查看完整訂單 →</div><div class="table-wrap order-table-wrap"><table class="admin-table order-management-table"><thead><tr><th>訂單／下單帳號</th><th>收件資訊</th><th>品項</th><th>金額</th><th>訂金備註</th><th>狀態</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></div>` : `<div class="empty">${state.adminOrderHistory ? '目前沒有歷史訂單' : '目前沒有處理中的訂單'}</div>`}</section>`;
@@ -770,6 +802,7 @@ function customerEditorModal() {
 }
 function successModal() { const order = state.lastOrder; return `<div class="modal-backdrop"><div class="modal success-modal"><div class="success-mark">✓</div><span class="eyebrow">ORDER RECEIVED</span><h2>訂單已成功送出</h2><p>我們會盡快確認採購內容。</p><div class="success-order"><span>訂單編號</span><strong>${esc(order?.order_number || '處理中')}</strong><span>下單帳號</span><strong>${esc(order?.account_email || state.user?.email || '未記錄')}</strong><span>商品金額</span><strong>${money(order?.total_amount || 0)}</strong></div><button class="btn btn-primary add-cart-wide" data-action="view-orders">查看我的訂單</button><button class="forgot-link" data-action="continue-shopping">繼續逛逛</button></div></div>`; }
 
+<<<<<<< HEAD
 
 function normalizeCoverLayout(layout) {
   const zoom = Number(layout?.zoom ?? 1), y = Number(layout?.y ?? 50);
@@ -814,11 +847,16 @@ function bindCoverAdjustment() {
   if (image?.src.startsWith('blob:')) image.addEventListener('load',()=>URL.revokeObjectURL(image.src),{once:true});
 }
 
+=======
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
 function createMarketDraft(market) {
   const defaultClose = new Date(); defaultClose.setMonth(defaultClose.getMonth() + 1);
   return {
     name: market?.name || '', description: market?.description || '', image_url: market?.image_url || '', file: null, removeBg: false, imageRemoved: false,
+<<<<<<< HEAD
     cover_layout: market?.cover_layout ? normalizeCoverLayout(market.cover_layout) : null, coverAdjustOpen: false,
+=======
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
     closes_at: dateValue(market?.closes_at) || dateValue(defaultClose),
     is_active: market?.is_active ?? true, sort_order: market?.sort_order || 0,
     deletedProducts: [],
@@ -833,7 +871,11 @@ function marketItemRow(item, index) {
 function marketEditorModal() {
   const draft = state.marketDraft || createMarketDraft();
   const rows = draft.products.map(marketItemRow).join('');
+<<<<<<< HEAD
   return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="market-basic-grid"><div class="field"><label>賣場名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購"/></div><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="2">${esc(draft.description)}</textarea></div><div class="market-cover-compact"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : ''}</span><label class="btn btn-light image-button">選擇封面<input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><button class="btn btn-light image-clear-market" type="button" data-clear-market-image ${(draft.file || draft.image_url) ? '' : 'disabled'}>刪除圖片</button><button class="btn btn-light" type="button" data-adjust-market-cover ${(draft.file || draft.image_url) && state.coverLayoutReady ? '' : 'disabled'} aria-expanded="${Boolean(draft.coverAdjustOpen)}">調整封面</button><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去背</label><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>立即上架</span></label></div>${coverAdjustmentPanel(draft)}${state.coverLayoutReady ? '' : '<p class="setup-notice">請先在 Supabase 執行 market_cover_layout_upgrade.sql 啟用封面調整。</p>'}<div class="editor-divider"><div><strong>商品／規格</strong><small>同一列完成名稱、成本、售價、數量與圖片</small></div></div><div class="item-editors compact-list">${rows || `<div class="empty">請先新增至少一個商品</div>`}</div><div class="editor-save-bar"><div class="editor-item-tools"><span data-market-item-count>共 ${draft.products.length} 個商品</span><button class="btn btn-light" data-action="add-draft-item">＋ 新增選項</button></div><div class="editor-save-actions"><button class="btn btn-light" data-action="cancel-market">取消</button><button class="btn btn-primary" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與商品'}</button></div></div></div></div>`;
+=======
+  return `<div class="modal-backdrop"><div class="modal market-editor"><div class="modal-head"><div><span class="eyebrow">MARKET EDITOR</span><h2>${state.editingMarketId ? '編輯賣場' : '建立賣場'}</h2></div><button class="close" data-action="close">×</button></div><div class="market-basic-grid"><div class="field"><label>賣場名稱</label><input id="market-name" value="${esc(draft.name)}" placeholder="例：三麗鷗聯名預購"/></div><div class="field"><label>收單截止日期</label><input id="market-closes-at" type="date" value="${esc(draft.closes_at)}"/></div></div><div class="field"><label>賣場說明</label><textarea id="market-description" rows="2">${esc(draft.description)}</textarea></div><div class="market-cover-compact"><span class="upload-thumb market-upload-thumb">${draft.file ? `<img src="${URL.createObjectURL(draft.file)}" alt="封面預覽"/>` : draft.image_url ? `<img src="${esc(draft.image_url)}" alt="封面預覽"/>` : ''}</span><label class="btn btn-light image-button">選擇封面<input id="market-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"/></label><button class="btn btn-light image-clear-market" type="button" data-clear-market-image ${(draft.file || draft.image_url) ? '' : 'disabled'}>刪除圖片</button><label class="inline-check"><input id="market-remove-bg" type="checkbox" ${draft.removeBg ? 'checked' : ''}/> 自動去背</label><label class="check-field"><input id="market-active" type="checkbox" ${draft.is_active ? 'checked' : ''}/><span>立即上架</span></label></div><div class="editor-divider"><div><strong>商品／規格</strong><small>同一列完成名稱、成本、售價、數量與圖片</small></div></div><div class="item-editors compact-list">${rows || `<div class="empty">請先新增至少一個商品</div>`}</div><div class="editor-save-bar"><div class="editor-item-tools"><span data-market-item-count>共 ${draft.products.length} 個商品</span><button class="btn btn-light" data-action="add-draft-item">＋ 新增選項</button></div><div class="editor-save-actions"><button class="btn btn-light" data-action="cancel-market">取消</button><button class="btn btn-primary" data-action="save-market" ${state.busy ? 'disabled' : ''}>${state.busy ? '儲存中…' : '儲存賣場與商品'}</button></div></div></div></div>`;
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
 }
 
 function imagePreviewModal() {
@@ -919,12 +961,15 @@ function previewSelectedImage(input) {
   image.addEventListener('load', () => URL.revokeObjectURL(image.src), { once: true });
   preview.replaceChildren(image);
   syncMarketDraftFromForm();
+<<<<<<< HEAD
   if (input.id === 'market-image') {
     state.marketDraft.cover_layout = state.marketDraft.coverAdjustOpen ? normalizeCoverLayout(null) : null;
     replaceCoverAdjustmentPanel();
     const clear = document.querySelector('[data-clear-market-image]'); if (clear) clear.disabled = false;
     const adjust = document.querySelector('[data-adjust-market-cover]'); if (adjust) adjust.disabled = !state.coverLayoutReady;
   }
+=======
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
 }
 
 function bindPointerSort(container, rowSelector, handleSelector, onSorted, keepWithinGroup = false) {
@@ -1156,9 +1201,12 @@ function syncMarketDraftFromForm() {
 function clearMarketImage() {
   syncMarketDraftFromForm();
   state.marketDraft.file = null; state.marketDraft.image_url = ''; state.marketDraft.imageRemoved = true;
+<<<<<<< HEAD
   state.marketDraft.cover_layout = null; state.marketDraft.coverAdjustOpen = false;
   replaceCoverAdjustmentPanel();
   const adjust = document.querySelector('[data-adjust-market-cover]'); if (adjust) { adjust.disabled = true; adjust.setAttribute('aria-expanded','false'); }
+=======
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
   const input = document.querySelector('#market-image'); if (input) input.value = '';
   document.querySelector('.market-cover-compact .upload-thumb')?.replaceChildren();
   const button = document.querySelector('[data-clear-market-image]'); if (button) button.disabled = true;
@@ -1233,7 +1281,10 @@ async function saveMarket() {
     }
     const coverUrl = await uploadImage(marketImage, draft.removeBg);
     const marketPayload = { name: draft.name, description: draft.description, is_active: draft.is_active, closes_at: new Date(`${draft.closes_at}T23:59:59`).toISOString() };
+<<<<<<< HEAD
     if (state.coverLayoutReady) marketPayload.cover_layout = draft.imageRemoved ? null : draft.cover_layout;
+=======
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
     if (coverUrl) marketPayload.image_url = coverUrl; else if (draft.imageRemoved || !existing) marketPayload.image_url = null;
     let marketId = existing?.id;
     if (existing) { const { error } = await supabase.from('markets').update(marketPayload).eq('id', existing.id); if (error) throw error; }
@@ -2160,6 +2211,7 @@ function bind() {
   bindPointerSort(document.querySelector('#market-sort-list'), '[data-market-sort]', '[data-market-drag]', saveMarketOrder, true);
   document.querySelector('[data-action="add-draft-item"]')?.addEventListener('click', appendMarketDraftItem);
   document.querySelectorAll('[data-remove-draft-item]').forEach((button) => button.addEventListener('click', () => deleteProductFromEditor(button.dataset.removeDraftItem, button.dataset.productId)));
+<<<<<<< HEAD
   bindCoverAdjustment();
   document.querySelector('[data-adjust-market-cover]')?.addEventListener('click', (event) => {
     syncMarketDraftFromForm();
@@ -2168,6 +2220,8 @@ function bind() {
     event.currentTarget.setAttribute('aria-expanded', String(state.marketDraft.coverAdjustOpen));
     replaceCoverAdjustmentPanel();
   });
+=======
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
   document.querySelector('[data-clear-market-image]')?.addEventListener('click', clearMarketImage);
   document.querySelectorAll('[data-clear-item-image]').forEach((button) => button.addEventListener('click', () => clearItemImage(button.dataset.clearItemImage)));
   bindPointerSort(document.querySelector('.item-editors'), '[data-item-row]', '[data-item-drag]', (rows) => { rows.forEach((row, index) => { const handle = row.querySelector('[data-item-drag]'); if (handle) handle.textContent = index + 1; }); syncMarketDraftFromForm(); });

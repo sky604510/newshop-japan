@@ -664,6 +664,7 @@ body.modal-open .pwa-install { display:none; }
   .summary-head:has(.procurement-head-actions) { flex-direction: column; align-items: flex-start; gap: 10px; }
   .procurement-head-actions { width: 100%; justify-content: space-between; }
 }
+<<<<<<< HEAD
 .cover-adjustment { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: #fffafd; }
 .cover-adjustment[hidden] { display: none; }
 .cover-adjustment p { color: var(--muted); font-size: 13px; }
@@ -683,3 +684,5 @@ body.modal-open .pwa-install { display:none; }
   .cover-preview-frame, .market-cover:has(img.cover-adjusted) { aspect-ratio: 1.45; }
   .cover-adjust-sliders { grid-template-columns: 1fr; gap: 12px; }
 }
+=======
+>>>>>>> fdb289bd19ed18a7134a562c34357180061e5214
