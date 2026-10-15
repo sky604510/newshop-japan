@@ -19,7 +19,7 @@ try {
       const {createProfitSharing,allocateQuantities,allocationSummary}=await import(URL.createObjectURL(new Blob([moduleSource],{type:'text/javascript'})));
       const tables={
         markets:[{id:'m1',name:'測試賣場',is_active:true,products:[{id:'p1',market_id:'m1',name:'已採購未發貨商品',price:1500,stock:3,is_active:true},{id:'p2',market_id:'m1',name:'未採購已發貨商品',price:100,stock:3,is_active:true}]}],
-        orders:[{id:'o1',order_number:'NS-PURCHASE',recipient_name:'測試收件人',status:'confirmed',total_amount:1600,order_items:[{id:'a',product_id:'p1',market_id:'m1',product_name:'已採購未發貨商品',unit_price:1500,unit_cost:1000,quantity:1},{id:'b',product_id:'p2',market_id:'m1',product_name:'未採購已發貨商品',unit_price:100,unit_cost:10,quantity:1}]}],
+        orders:[{id:'o1',order_number:'NS-PURCHASE',recipient_name:'測試收件人',status:'confirmed',total_amount:750,deposit_amount:850,deposit_deduction:850,order_items:[{id:'a',product_id:'p1',market_id:'m1',product_name:'已採購未發貨商品',unit_price:1500,unit_cost:1000,quantity:1},{id:'b',product_id:'p2',market_id:'m1',product_name:'未採購已發貨商品',unit_price:100,unit_cost:10,quantity:1}]}],
         procurement_checks:[{product_id:'p1',is_purchased:true,cost_allocations:{a:[1,0],a2:[1,1]}},{product_id:'p2',is_purchased:false}],
         product_costs:[{product_id:'p1',cost:1000},{product_id:'p2',cost:10}],
         order_item_fulfillments:[{order_item_id:'a',shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:'2026-10-02'},{order_item_id:'a2',shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:'2026-10-02'},{order_item_id:'b',shipped_at:'2026-10-01'}],
@@ -74,12 +74,14 @@ try {
     assert.equal(await page.locator('[data-procurement-history]').count(),0);
     await page.locator('[data-profit-product="p1"]').check();
     assert.match(await page.locator('[data-profit-selection]').textContent(), /1 個商品・3 件/);
+    assert.equal((await page.locator('.admin-page').textContent()).includes('已扣商品內扣'),false);
     assert.equal(await page.locator('[data-profit-market="m1"]').isChecked(),true);
     await page.locator('[data-profit-market="m1"]').uncheck();
     assert.equal(await page.locator('[data-profit-next]').isDisabled(),true);
     await page.locator('[data-profit-market="m1"]').check();
     assert.equal(await page.locator('[data-profit-product="p1"]').isChecked(),true);
     await page.locator('[data-profit-next]').click();
+    assert.equal(await page.locator('[data-profit-received]').inputValue(),'4300','Sharing includes redeemed deposit');
     await page.locator('[data-profit-title]').fill('保留草稿');
     await page.locator('[data-profit-confirmed]').check();
     await page.locator('[data-profit-calculate]').click();

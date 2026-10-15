@@ -683,3 +683,18 @@ body.modal-open .pwa-install { display:none; }
   .cover-preview-frame, .market-cover:has(img.cover-adjusted) { aspect-ratio: 1.45; }
   .cover-adjust-sliders { grid-template-columns: 1fr; gap: 12px; }
 }
+
+/* Admin navigation and content occupy separate rows; only the content scrolls. */
+body.admin-workspace { height: 100dvh; overflow: hidden; }
+.admin-workspace .shell { height: 100dvh; min-height: 0; display: flex; flex-direction: column; }
+.admin-workspace .nav { position: static; flex-shrink: 0; background: var(--cream); }
+.admin-workspace .admin-page { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; gap: 12px; margin: 16px 0 0; overflow: hidden; }
+.admin-workspace .admin-tabs { position: static; top: auto; flex-shrink: 0; margin: 0; background: var(--cream); }
+.admin-content { flex: 1; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-padding-top: 14px; padding: 4px 4px 24px; }
+.admin-content:focus-visible { outline: 2px solid var(--rose-deep); outline-offset: -2px; }
+.admin-content .profit-selection-bar { top: 0; }
+.admin-content footer { margin-bottom: 0; }
+@media (max-width: 820px) {
+  .admin-workspace .admin-page { gap: 10px; margin-top: 10px; }
+  .admin-content { padding: 2px 0 16px; }
+}

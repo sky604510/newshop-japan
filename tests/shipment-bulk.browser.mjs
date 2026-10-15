@@ -108,17 +108,17 @@ try {
     await page.evaluate(() => {
       const panel=document.querySelector('.reconciliation-toolbar').closest('.panel');
       const spacer=document.createElement('div');spacer.style.height='1500px';spacer.id='sticky-test-spacer';panel.append(spacer);
-      window.scrollTo(0,900);
+      document.querySelector('.admin-content').scrollTop=900;
     });
     await page.waitForTimeout(100);
     const sticky = await page.evaluate(() => {
       const bar=document.querySelector('.reconciliation-toolbar'), tabs=document.querySelector('.admin-tabs');
-      return { top:bar.getBoundingClientRect().top, expected:parseFloat(getComputedStyle(bar).top), tabBottom:tabs.getBoundingClientRect().bottom };
+      return { top:bar.getBoundingClientRect().top, expected:document.querySelector('.admin-content').getBoundingClientRect().top+parseFloat(getComputedStyle(document.querySelector('.admin-content')).paddingTop)+parseFloat(getComputedStyle(bar).top), tabBottom:tabs.getBoundingClientRect().bottom };
     });
     assert.ok(Math.abs(sticky.top-sticky.expected)<2,'Toolbar remains pinned when scrolling');
     assert.ok(sticky.top>=sticky.tabBottom+9,'Toolbar clears the sticky admin navigation');
     await page.screenshot({path:join(output,`sticky-${width}.png`)});
-    await page.evaluate(()=>{document.querySelector('#sticky-test-spacer').remove();window.scrollTo(0,0);});
+    await page.evaluate(()=>{document.querySelector('#sticky-test-spacer').remove();document.querySelector('.admin-content').scrollTop=0;});
     assert.match(await page.locator('[data-reconcile-summary]').textContent(),/2 筆・總金額 NT\$ 300・總獲利 NT\$ 150/);
     await page.locator('[data-reconcile-select="D"]').uncheck();
     assert.match(await page.locator('[data-reconcile-summary]').textContent(),/1 筆・總金額 NT\$ 200・總獲利 NT\$ 100/);

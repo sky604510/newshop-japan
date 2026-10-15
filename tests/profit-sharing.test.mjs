@@ -12,7 +12,7 @@ test('依賣場商品合併不同訂單：數量、成本、售價、內扣與�
   assert.equal(rows.length,1);assert.equal(rows[0].rows.length,1);
   const row=rows[0].rows[0];
   assert.equal(row.quantity,3);assert.equal(row.totalCost,2600);assert.equal(row.revenue,4300);
-  assert.equal(row.cost,867);assert.equal(row.buyers,2);assert.equal(row.profit,1600);
+  assert.equal(row.cost,867);assert.equal(row.buyers,2);assert.equal(row.profit,1700);
   assert.deepEqual(row.items.map(item=>item.id),['a','b']);
 });
 
@@ -79,4 +79,14 @@ test('還原提醒重新讀取已分潤紀錄，不能因本地資料過期漏�
   const warning = await controller.restoreWarning(['a', 'b']);
   assert.equal(warning.count, 1);
   assert.match(warning.message, /不會再次進入待分潤/);
+});
+
+test('抵用訂金不是商品折價：三件 850、成本 710，利潤為 420', () => {
+  const product = {id:'p',name:'幽靈老鴨'};
+  const items = [{id:'duck',product_id:'p',quantity:3,unit_price:850,unit_cost:710,deduction:850}];
+  const grouped = procurementProfitGroups(items,[{id:'market',name:'賣場',products:[product]}])[0].rows[0];
+  assert.equal(grouped.revenue,2550); assert.equal(grouped.deduction,850); assert.equal(grouped.profit,420);
+  const result = calculateProfitShare(items,{parties:[{name:'豪',ratio:50},{name:'盈',ratio:50}],collector:1,received:2550,receivedConfirmed:true,payers:{duck:0},allocations:{duck:[3,0]},expenses:[]});
+  assert.equal(result.profit,420); assert.deepEqual(result.parties.map(p=>p.share),[210,210]);
+  assert.deepEqual(result.parties.map(p=>p.balance),[2340,-2340]);
 });

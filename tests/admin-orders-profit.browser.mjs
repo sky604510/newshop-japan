@@ -1,0 +1,82 @@
+import {createRequire} from 'node:module';
+import {readFile,mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import assert from 'node:assert/strict';
+const {chromium}=createRequire(import.meta.url)('playwright');
+const source=(await readFile(new URL('../app.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'').replace(/render\(\);\r?\ninitialize\(\);\s*$/,'').replaceAll("await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs')",'window.XLSX');
+const moduleSource=await readFile(new URL('../profit-sharing.js',import.meta.url),'utf8');
+const css=(await readFile(new URL('../styles.css',import.meta.url),'utf8')).replace(/^@import[^\r\n]+\r?\n/,'');
+const output=await mkdtemp(join(tmpdir(),'newshop-admin-orders-'));
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try {
+  for(const width of [1366,390,320]) {
+    const page=await browser.newPage({viewport:{width,height:900}});
+    page.setDefaultTimeout(10000);
+    const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.route('http://localhost/admin-test',r=>r.fulfill({contentType:'text/html',body:`<meta charset="utf-8"><style>${css}</style><div id="app"></div>`}));
+    await page.goto('http://localhost/admin-test');
+    await page.evaluate(async({source,moduleSource})=>{
+      const {createProfitSharing,allocateQuantities,allocationSummary}=await import(URL.createObjectURL(new Blob([moduleSource],{type:'text/javascript'})));
+      const createDepositManagement=()=>({bind(){},capture(){},load:async()=>{},panel(){return '';},modal(){return '';}});
+      const makeOrder=(id,name,day,status='confirmed')=>({id,recipient_name:name,order_number:'NS-'+id,status,created_at:`2026-10-${String(day).padStart(2,'0')}T10:00:00Z`,delivery_method:'面交取貨',total_amount:850,order_items:[{id:'i-'+id,product_id:'p',market_id:'m',product_name:'幽靈老鴨',unit_price:850,unit_cost:710,quantity:1,subtotal:850}]});
+      const orders=[makeOrder('z1','Zoe',1),makeOrder('a1','Amy',1),makeOrder('w2','王小華',1),makeOrder('a2','Amy',2),makeOrder('b1','Ben',3),makeOrder('a3',' Amy ',3),makeOrder('w1','王小華',2),...Array.from({length:25},(_,i)=>makeOrder('z-'+i,'Zoe',(i%12)+1)),makeOrder('hz','Zoe',2,'completed'),makeOrder('ha1','Amy',1,'completed'),makeOrder('hw','王小華',4,'cancelled'),makeOrder('ha2','Amy',3,'cancelled')];
+      const market={id:'m',name:'非常態性商品',is_active:true,products:[{id:'p',market_id:'m',name:'幽靈老鴨',price:850,cost:710,stock:99,is_active:true}]};
+      const tables={orders,markets:[market],products:market.products,procurement_checks:[],product_costs:[{product_id:'p',cost:710}],profit_share_settlements:[],order_item_fulfillments:[],customers:[]};
+      const createClient=()=>({auth:{onAuthStateChange(){}},from:table=>{const query={select(){return query;},order(){return query;},then(resolve){resolve({data:structuredClone(tables[table]||[]),error:null});}};return query;}});
+      window.XLSX={utils:{book_new:()=>({Sheets:{}}),json_to_sheet:rows=>({rows}),book_append_sheet:(book,sheet,name)=>book.Sheets[name]=sheet},writeFile:book=>{window.exportedRows=book.Sheets['訂單'].rows;}};
+      eval(source+`
+        state.user={id:'admin',email:'admin@test'};state.profile={role:'owner'};state.loading=false;state.view='admin';state.adminTab='orders';
+        state.orders=tables.orders;state.markets=normalizeMarkets(tables.markets);state.products=state.markets.flatMap(m=>m.products);render();
+        window.orderHooks={state,tables,render,ordersByRecipient,marketSummaries,shipmentSummaries};
+      `);
+    },{source,moduleSource});
+    const originalIds=await page.evaluate(()=>window.orderHooks.state.orders.map(o=>o.id));
+    const ids=await page.locator('.order-management-table tbody tr').evaluateAll(rows=>rows.map(row=>row.id));
+    assert.deepEqual(ids.slice(2,6),['order-a3','order-a2','order-a1','order-b1']);
+    assert.deepEqual(ids.slice(0,2),['order-w1','order-w2']);
+    assert.equal(ids.filter(id=>id.startsWith('order-z')).length,26);
+    assert.deepEqual(await page.evaluate(()=>window.orderHooks.state.orders.map(o=>o.id)),originalIds,'Display sorting must not mutate load order');
+    await page.locator('[data-action="export"]').click();
+    await page.waitForFunction(()=>Array.isArray(window.exportedRows));
+    const exported=await page.evaluate(()=>window.exportedRows.slice(3,8).map(row=>row.訂單編號));
+    assert.deepEqual(exported,['NS-a3','NS-ha2','NS-a2','NS-a1','NS-ha1']);
+    const before=await page.locator('.admin-tabs').boundingBox();
+    await page.locator('.admin-content').evaluate(el=>el.scrollTop=900);
+    assert.ok(await page.locator('.admin-content').evaluate(el=>el.scrollTop>0));
+    const after=await page.locator('.admin-tabs').boundingBox();
+    assert.ok(Math.abs(before.y-after.y)<1,'Tab row stays in its own layout row');
+    const region=await page.locator('.admin-content').boundingBox();
+    assert.ok(region.y>=after.y+after.height+9,'Scrolling content is clipped below navigation');
+    assert.equal(await page.evaluate(()=>scrollY),0,'Only the content region scrolls');
+    await page.evaluate(()=>window.orderHooks.render());
+    assert.equal(await page.locator('.admin-content').evaluate(el=>el.scrollTop),900,'Rerender retains the current scroll position');
+    await page.screenshot({path:join(output,`orders-scrolled-${width}.png`)});
+    await page.locator('[data-order-history="history"]').click();
+    assert.deepEqual(await page.locator('.order-management-table tbody tr').evaluateAll(rows=>rows.map(row=>row.id)),['order-hw','order-ha2','order-ha1','order-hz']);
+    await page.locator('[data-order-history="current"]').click();
+    await page.evaluate(()=>{
+      const {state,tables,render}=window.orderHooks;
+      const order={id:'duck-order',order_number:'NS-DUCK',recipient_name:'王小華',phone:'',status:'confirmed',delivery_method:'面交取貨',deposit_amount:850,deposit_deduction:850,total_amount:1700,created_at:'2026-10-15T10:00:00Z',order_items:[{id:'duck',product_id:'p',market_id:'m',product_name:'幽靈老鴨',unit_price:850,unit_cost:710,quantity:3,subtotal:2550}]};
+      state.orders=[order];tables.orders=[order];state.adminTab='summary';state.procurementHistory=false;
+      state.procurementChecks.set('p',{is_purchased:false,cost_allocations:{duck:[3,0]}});render();
+    });
+    const profit=await page.locator('[data-procurement-product="p"]').evaluate(el=>el.closest('tr').querySelector('td.profit').textContent);
+    assert.equal(profit,'NT$ 420');
+    assert.equal((await page.locator('.admin-content').textContent()).includes('已扣商品內扣'),false);
+    assert.match(await page.locator('.procurement-subtotal').textContent(),/NT\$ 2,130/);
+    assert.match(await page.locator('.procurement-subtotal').textContent(),/NT\$ 2,550/);
+    const summary=await page.evaluate(()=>window.orderHooks.marketSummaries()[0].rows[0]);
+    assert.equal(summary.revenue,2550);assert.equal(summary.profit,420);
+    const shipment=await page.evaluate(()=>window.orderHooks.shipmentSummaries('pending')[0]);
+    assert.equal(shipment.amount,1700,'Unpaid balance still applies the deposit');assert.equal(shipment.profit,420);
+    await page.screenshot({path:join(output,`procurement-profit-${width}.png`)});
+    await page.evaluate(()=>{window.orderHooks.state.view='shop';window.orderHooks.render();});
+    assert.equal(await page.evaluate(()=>document.body.classList.contains('admin-workspace')),false);
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    assert.deepEqual(errors,[]);
+    console.log(`PASS ${width}px: current/history name grouping, newest first, Excel order, separate scrolling, scroll retention, deposit profit 420, balance 1700`);
+    await page.close();
+  }
+  console.log('Screenshots: '+output);
+}finally{await browser.close();}
