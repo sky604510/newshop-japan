@@ -35,6 +35,7 @@ try {
       await controller.load(); render(); window.profitFixture = { controller, state, render };
     }, source);
     assert.equal(await page.locator('[data-profit-product]').count(), 1);
+    assert.equal(await page.locator('.procurement-subtotal td').nth(6).textContent(),'NT$ 1,500');
     assert.equal(await page.locator('.profit-item-thumb img').count(), 1);
     assert.equal(await page.locator('[data-profit-title]').count(), 0, 'First step shows selection only');
     assert.ok(await page.locator('[data-profit-next]').isDisabled());
@@ -47,6 +48,7 @@ try {
     await page.screenshot({ path:join(output, `selection-${width}.png`) });
     await page.locator('[data-profit-next]').click();
     assert.equal(await page.locator('[data-profit-party]').count(), 2);
+    assert.equal(await page.locator('.procurement-subtotal td').nth(6).textContent(),'NT$ 1,500');
     assert.deepEqual(await page.locator('[data-profit-ratio]').evaluateAll(rows=>rows.map(row=>row.value)), ['50','50']);
     await page.locator('[data-profit-title]').fill('測試分潤批次');
     await page.screenshot({path:join(output, `settings-${width}.png`),fullPage:true});
@@ -75,6 +77,7 @@ try {
     await page.locator('[data-profit-calculate]').click();
     assert.match(await page.locator('.profit-transfer').textContent(), /盈 應轉給 豪 NT\$ 1,200/);
     assert.equal(await page.locator('.profit-result-items .profit-item-thumb img').count(), 1);
+    assert.equal(await page.locator('.procurement-subtotal td').nth(6).textContent(),'NT$ 1,500');
     assert.equal(await page.locator('.modal-backdrop').count(), 0, 'Calculation moves to result page, not a popup');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), 'Result page fits viewport');
 

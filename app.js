@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createProfitSharing, allocateQuantities, allocationSummary } from './profit-sharing.js?v=13';
-import { createDepositManagement } from './deposit-management.js?v=6';
+import { createProfitSharing, allocateQuantities, allocationSummary } from './profit-sharing.js?v=14';
+import { createDepositManagement } from './deposit-management.js?v=7';
 
 const supabase = createClient(
   'https://qikmnuchhfmkseoenawr.supabase.co',
@@ -18,7 +18,7 @@ const state = {
   marketDraft: null, editingMarketId: null, orderDraft: null, editingOrderId: null, lastOrder: null,
   customerDraft: null, checkoutMode: 'general',
   checkoutDraft: JSON.parse(localStorage.getItem('newshop_checkout_draft') || '{}'),
-  authMode: 'login', adminTab: 'markets', adminOrderHistory: false, procurementHistory: false, shipmentView: 'pending',
+  authMode: 'login', adminTab: 'markets', adminMenuCollapsed: false, adminMenuOpenedFromCompact: false, adminOrderHistory: false, procurementHistory: false, shipmentView: 'pending',
   costPeopleReady: true, costPeopleBusy: false, procurementChecks: new Map(), fulfillmentChecks: new Map(), shipmentSelection: new Set(), shipmentRecipientSelection: new Set(), loading: true, busy: false, toast: '', marketFeatureReady: true, coverLayoutReady: true,
   operationsReady: true, costReady: true, pricingReady: true, adminOpsReady: true, orderEditorReady: true, sortingReady: true,
   fulfillmentReady: true, shipmentNoteReady: true, shipmentCompletionReady: true, shipmentReconciliationReady: true, shipmentBatchReady: true, shipmentBatchNameReady: true, reconciliationBusy: false, orderCostOverrideReady: true, shipmentBusy: false, depositReady: true, depositDetailsReady: true,
@@ -305,7 +305,7 @@ supabase.auth.onAuthStateChange((event, session) => window.setTimeout(() => {
 function nav() {
   const admin = isManager() ? `<button class="nav-admin ${state.view === 'admin' ? 'active' : ''}" data-view="admin">管理員後台</button>` : '';
   const member = state.user ? esc(state.user.email || '會員') : '登入';
-  return `<header class="nav"><button class="brand" data-view="shop"><span class="brand-mark"><span class="brand-logo-fallback">NS</span><img class="brand-logo" src="/assets/logo_v2.png?v=1" alt="NewShop Logo"/></span><span>NewShop連線代購</span></button><nav class="navlinks"><button class="nav-shop ${state.view === 'shop' ? 'active' : ''}" data-view="shop">逛賣場</button><button class="nav-guide" data-scroll="guide">購物須知</button><button class="nav-member ${state.view === 'orders' ? 'active' : ''}" data-view="orders" title="${member}">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物車 <span class="badge">${cartCount()}</span></button></nav></header>`;
+  return `<header class="nav" id="site-header"><button class="brand" data-view="shop"><span class="brand-mark"><span class="brand-logo-fallback">NS</span><img class="brand-logo" src="/assets/logo_v2.png?v=1" alt="NewShop Logo"/></span><span>NewShop連線代購</span></button><nav class="navlinks"><button class="nav-shop ${state.view === 'shop' ? 'active' : ''}" data-view="shop">逛賣場</button><button class="nav-guide" data-scroll="guide">購物須知</button><button class="nav-member ${state.view === 'orders' ? 'active' : ''}" data-view="orders" title="${member}">${member}</button>${admin}<button class="cart-btn" data-action="cart">購物車 <span class="badge">${cartCount()}</span></button></nav></header>`;
 }
 
 function marketPrice(market) {
@@ -617,6 +617,46 @@ function orderEditorModal() {
 }
 
 const recipientNameOrder = new Intl.Collator('zh-Hant-TW', { numeric: true });
+function adminMobileToolbar() {
+  const labels = {markets:'賣場管理',orders:'訂單管理',summary:'採購清單',shipments:'發貨清單',deposits:'訂金管理',profits:'分潤清單',customers:'客戶管理'};
+  return `<div class="admin-mobile-toolbar"><strong>${labels[state.adminTab] || '管理員後台'}</strong><button type="button" class="btn btn-light" data-admin-menu-toggle aria-controls="site-header admin-navigation" aria-expanded="${!state.adminMenuCollapsed}">${state.adminMenuCollapsed ? '其他 ▾' : '收合選單 ▴'}</button></div>`;
+}
+
+function bindAdminMobileNavigation() {
+  const content = document.querySelector('.admin-content');
+  const toggle = document.querySelector('[data-admin-menu-toggle]');
+  if (!content || !toggle) return;
+  const apply = (collapsed) => {
+    const top = content.scrollTop;
+    state.adminMenuCollapsed = collapsed;
+    document.body.classList.toggle('admin-menu-collapsed', collapsed);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.textContent = collapsed ? '其他 ▾' : '收合選單 ▴';
+    content.scrollTop = top;
+  };
+  let ignoreScrollUntil = 0, userScrollUntil = 0, lastTop = content.scrollTop;
+  toggle.addEventListener('click', () => {
+    const expand = state.adminMenuCollapsed;
+    state.adminMenuOpenedFromCompact = expand;
+    ignoreScrollUntil = performance.now() + 500;
+    apply(!expand);
+    lastTop = content.scrollTop;
+  });
+  const armScroll = () => { userScrollUntil = performance.now() + 1200; };
+  content.addEventListener('wheel', armScroll, {passive:true});
+  content.addEventListener('touchstart', armScroll, {passive:true});
+  content.addEventListener('touchmove', armScroll, {passive:true});
+  content.addEventListener('keydown', (event) => { if (['ArrowDown','PageDown','End',' '].includes(event.key)) armScroll(); });
+  content.addEventListener('scroll', () => {
+    const top = content.scrollTop, down = top > lastTop; lastTop = top;
+    const now = performance.now();
+    if (down && top > 48 && now < userScrollUntil && now > ignoreScrollUntil && !state.adminMenuCollapsed && matchMedia('(max-width:820px)').matches) {
+      state.adminMenuOpenedFromCompact = false;
+      apply(true); lastTop = content.scrollTop;
+    }
+  }, {passive:true});
+}
+
 function ordersByRecipient(orders) {
   const nameOf = (order) => String(order.recipient_name || '').trim().normalize('NFC');
   return [...orders].sort((a, b) => {
@@ -656,7 +696,7 @@ function adminView() {
   const customerPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">CUSTOMERS</span><h2>購買人與常客清單</h2><p>只有收件人為必填，信箱與電話皆可留空。</p></div><button class="btn btn-accent" data-action="new-customer" ${state.operationsReady ? '' : 'disabled'}>＋ 新增常客</button></div>${state.customers.length ? `<div class="table-wrap"><table class="admin-table customer-table"><thead><tr><th>收件人</th><th>信箱（選填）</th><th>電話（選填）</th><th>取貨方式</th><th>最近商品</th><th class="customer-flag">常客</th><th class="customer-flag vip">VIP</th><th>備註</th><th>操作</th></tr></thead><tbody>${customerRows}</tbody></table></div>` : `<div class="empty">尚無買家資料；會員完成第一筆訂單後會自動建立。</div>`}</section>`;
   const marketPanel = `<section class="panel"><div class="section-head"><div><span class="eyebrow">MARKETS & ITEMS</span><h2>賣場管理</h2><p>拖曳調整同一區內的順序；可同時置頂多個賣場。</p></div><button class="btn btn-accent" data-action="new-market" ${state.marketFeatureReady ? '' : 'disabled'}>＋ 建立賣場</button></div>${state.markets.length ? `<div class="table-wrap"><table class="admin-table market-sort-table"><thead><tr><th>排序</th><th>賣場</th><th>品項數</th><th>總庫存</th><th>操作</th></tr></thead><tbody id="market-sort-list">${marketRows}</tbody></table></div>` : `<div class="empty">尚未建立賣場</div>`}</section>`;
   const panels = { orders: orderPanel, summary: summaryPanel, profits: state.adminTab === 'profits' ? profitSharing.panel() : '', shipments: shipmentPanel, deposits: state.adminTab === 'deposits' ? depositManagement.panel() : '', customers: customerPanel, markets: marketPanel };
-  return `<main class="admin-page">${migrationNotice}${state.shipmentReconciliationReady ? '' : '<div class="setup-notice">請執行 shipment_reconciliation_upgrade.sql 啟用待收款、對帳完成與分潤流程。</div>'}${orderCostNotice}<div class="admin-tabs" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購清單</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'deposits' ? 'active' : ''}" data-admin-tab="deposits">訂金管理</button><button class="${state.adminTab === 'profits' ? 'active' : ''}" data-admin-tab="profits">分潤清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div><div class="admin-content" data-admin-panel="${state.adminTab}" role="region" aria-label="後台內容" tabindex="0">${panels[state.adminTab] || marketPanel}${footer()}</div></main>`;
+  return `<main class="admin-page">${migrationNotice}${state.shipmentReconciliationReady ? '' : '<div class="setup-notice">請執行 shipment_reconciliation_upgrade.sql 啟用待收款、對帳完成與分潤流程。</div>'}${orderCostNotice}${adminMobileToolbar()}<div class="admin-tabs" id="admin-navigation" role="tablist"><button class="${state.adminTab === 'markets' ? 'active' : ''}" data-admin-tab="markets">賣場管理</button><button class="${state.adminTab === 'orders' ? 'active' : ''}" data-admin-tab="orders">訂單管理</button><button class="${state.adminTab === 'summary' ? 'active' : ''}" data-admin-tab="summary">採購清單</button><button class="${state.adminTab === 'shipments' ? 'active' : ''}" data-admin-tab="shipments">發貨清單</button><button class="${state.adminTab === 'deposits' ? 'active' : ''}" data-admin-tab="deposits">訂金管理</button><button class="${state.adminTab === 'profits' ? 'active' : ''}" data-admin-tab="profits">分潤清單</button><button class="${state.adminTab === 'customers' ? 'active' : ''}" data-admin-tab="customers">客戶管理</button></div><div class="admin-content" data-admin-panel="${state.adminTab}" role="region" aria-label="後台內容" tabindex="0">${panels[state.adminTab] || marketPanel}${footer()}</div></main>`;
 }
 
 function footer() { return `<footer><strong>NewShop連線代購</strong><span><a href="mailto:sky604510@gmail.com">sky604510@gmail.com</a> ・ 會員與訂單由 Supabase 安全保存</span></footer>`; }
@@ -894,6 +934,7 @@ function render() {
   document.querySelector('#app').innerHTML = `<div class="shell">${nav()}${content}${state.view === 'admin' ? '' : footer()}</div>${state.modal ? modal() : ''}${state.previewImage ? imagePreviewModal() : ''}`;
   document.body.classList.toggle('modal-open', Boolean(state.modal || state.previewImage));
   document.body.classList.toggle('admin-workspace', state.view === 'admin' && Boolean(document.querySelector('.admin-content')));
+  document.body.classList.toggle('admin-menu-collapsed', state.view === 'admin' && state.adminMenuCollapsed);
   bind();
   const nextModal = document.querySelector('.modal');
   const nextDetail = document.querySelector('.detail-copy');
@@ -2040,6 +2081,7 @@ function bindBackdropClose(backdrop, close) {
 }
 
 function bind() {
+  bindAdminMobileNavigation();
   const brandLogo = document.querySelector('.brand-logo');
   if (brandLogo) {
     const updateLogo = () => brandLogo.closest('.brand-mark').classList.toggle('logo-failed', !brandLogo.naturalWidth);
@@ -2098,6 +2140,7 @@ function bind() {
   document.querySelectorAll('[data-shipment-snapshot]').forEach((button) => button.addEventListener('click', () => openStatementSnapshot(button.dataset.shipmentSnapshot, button)));
   document.querySelectorAll('[data-admin-tab]').forEach((button) => button.addEventListener('click', async () => {
     const nextTab = button.dataset.adminTab;
+    if (state.adminMenuOpenedFromCompact && matchMedia('(max-width:820px)').matches) { state.adminMenuCollapsed = true; state.adminMenuOpenedFromCompact = false; }
     if (state.adminTab === 'profits') profitSharing.capture();
     if (['shipments', 'deposits', 'profits'].includes(nextTab)) {
       try { await Promise.all([loadOrders(), loadMarkets(), loadProcurementChecks(), loadFulfillmentChecks(), profitSharing.load(), depositManagement.load()]); await loadProductCosts(); }

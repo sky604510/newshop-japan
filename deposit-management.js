@@ -1,7 +1,7 @@
 const recipientKey = (name, phone) => `${String(name || '').trim().toLowerCase()}|${String(phone || '').replace(/\D/g, '')}`;
 
 export function createDepositManagement({ state, supabase, esc, money, render, toast, bindBackdropClose, openOrder }) {
-  let ready = false, refunds = [], view = 'received', selected = null, busy = false;
+  let ready = false, zeroRefundReady = false, refunds = [], view = 'received', selected = null, busy = false;
   let previewController, previewTimer, previewElement;
 
   function hideOrderPreview() {
@@ -72,7 +72,7 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
   }
 
   async function load() {
-    if (!state.user || !['admin', 'owner'].includes(state.profile?.role)) { ready = false; refunds = []; return; }
+    if (!state.user || !['admin', 'owner'].includes(state.profile?.role)) { ready = false; zeroRefundReady = false; refunds = []; return; }
     const { data, error } = await supabase.from('order_deposit_refunds')
       .select('id,batch_id,order_id,order_number,recipient_name,phone,amount,refund_date,refund_source,refund_account,created_at')
       .order('created_at', { ascending: false });
@@ -81,7 +81,14 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
       if (/order_deposit_refunds|schema cache|does not exist/i.test(error.message || '')) return;
       throw error;
     }
-    ready = true; refunds = data || [];
+    const zeroResult = await supabase.from('order_deposit_zero_refunds')
+      .select('id,batch_id,order_id,order_number,recipient_name,phone,amount,refund_date,refund_source,refund_account,created_at,original_deposit,deposit_deduction,previous_refunds')
+      .order('created_at', { ascending: false });
+    zeroRefundReady = !zeroResult.error;
+    if (zeroResult.error && !/order_deposit_zero_refunds|schema cache|does not exist/i.test(zeroResult.error.message || '')) throw zeroResult.error;
+    ready = true;
+    refunds = [...(data || []), ...(zeroResult.data || []).map((entry) => ({...entry, zero_refund: true}))]
+      .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
   }
 
   function receivedGroups() {
@@ -92,7 +99,10 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
       const original = Number(order.deposit_amount || 0);
       const deduction = Number(order.deposit_deduction || 0);
       const amount = original - deduction - (returned.get(order.id) || 0);
-      if (original <= 0 || (amount <= 0 && (returned.get(order.id) || 0) > 0)) return;
+      const zeroClosed = refunds.some((entry) => entry.zero_refund && entry.order_id === order.id
+        && Number(entry.original_deposit) === original && Number(entry.deposit_deduction) === deduction
+        && Number(entry.previous_refunds) === (returned.get(order.id) || 0));
+      if (original <= 0 || (amount <= 0 && ((returned.get(order.id) || 0) > 0 || zeroClosed))) return;
       const key = recipientKey(order.recipient_name, order.phone);
       if (!groups.has(key)) groups.set(key, { key, recipient: order.recipient_name, phone: order.phone || '', orders: [], received: 0, deducted: 0, total: 0 });
       const group = groups.get(key);
@@ -103,9 +113,9 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
   }
 
   function panel() {
-    const header = `<div class="section-head"><div><span class="eyebrow">DEPOSIT MANAGEMENT</span><h2>訂金管理</h2><p>按收件人彙整訂金來源與退款紀錄；訂金只作備註，不參與訂單或分潤計算。</p></div></div><div class="sub-tabs"><button data-deposit-view="received" class="${view === 'received' ? 'active' : ''}">已收訂金</button><button data-deposit-view="refunded" class="${view === 'refunded' ? 'active' : ''}">已退訂金</button></div>`;
+    const header = `<div class="section-head"><div><span class="eyebrow">DEPOSIT MANAGEMENT</span><h2>訂金管理</h2><p>按收件人彙整訂金來源、折抵與退款紀錄；可退餘額為 0 時，可登記 0 元退款完成結清。</p></div></div><div class="sub-tabs"><button data-deposit-view="received" class="${view === 'received' ? 'active' : ''}">已收訂金</button><button data-deposit-view="refunded" class="${view === 'refunded' ? 'active' : ''}">已退訂金</button></div>`;
     if (!ready || !state.depositReady) return `<section class="panel">${header}<div class="empty">請先在 Supabase 執行 order_deposit_upgrade.sql 啟用訂金管理。</div></section>`;
-    if (view === 'received') return `<section class="panel">${header}<div class="deposit-groups">${receivedGroups().map((group) => `<article class="deposit-group"><div><h3>${esc(group.recipient)}</h3>${group.phone ? `<small>${esc(group.phone)}</small>` : ''}<div class="deposit-sources">${group.orders.map((order) => `<div class="deposit-source"><p><a class="deposit-order-link" data-deposit-order="${esc(order.id)}" href="#order-${esc(order.id)}">${esc(order.number)}</a><strong>${money(order.original)}</strong></p>${order.amount !== order.original ? `<small>可退餘額 ${money(order.amount)}</small>` : ''}${order.note ? `<small>備註：${esc(order.note)}</small>` : ''}${order.deduction ? `<small>商品內扣 ${money(order.deduction)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><span>訂金來源 ${group.orders.length} 筆</span><strong>總訂金 ${money(group.received)}</strong>${group.deducted ? `<span>已內扣 ${money(group.deducted)}</span>` : ''}<strong>可退訂金 ${money(group.total)}</strong><button class="btn btn-primary" data-deposit-refund="${esc(group.key)}" ${group.total > 0 ? '' : 'disabled'}>退訂</button></div></article>`).join('') || '<div class="empty">目前沒有未退的訂金</div>'}</div></section>`;
+    if (view === 'received') return `<section class="panel">${header}${zeroRefundReady ? '' : '<p class="setup-notice">0 元退款需先在 Supabase 執行 order_deposit_zero_refund_upgrade.sql。</p>'}<div class="deposit-groups">${receivedGroups().map((group) => `<article class="deposit-group"><div><h3>${esc(group.recipient)}</h3>${group.phone ? `<small>${esc(group.phone)}</small>` : ''}<div class="deposit-sources">${group.orders.map((order) => `<div class="deposit-source"><p><a class="deposit-order-link" data-deposit-order="${esc(order.id)}" href="#order-${esc(order.id)}">${esc(order.number)}</a><strong>${money(order.original)}</strong></p>${order.amount !== order.original ? `<small>可退餘額 ${money(order.amount)}</small>` : ''}${order.note ? `<small>備註：${esc(order.note)}</small>` : ''}${order.deduction ? `<small>商品內扣 ${money(order.deduction)}</small>` : ''}</div>`).join('')}</div></div><div class="deposit-group-total"><span>訂金來源 ${group.orders.length} 筆</span><strong>總訂金 ${money(group.received)}</strong>${group.deducted ? `<span>已內扣 ${money(group.deducted)}</span>` : ''}<strong>可退訂金 ${money(group.total)}</strong><button class="btn btn-primary" data-deposit-refund="${esc(group.key)}" ${group.total >= 0 && (group.total > 0 || zeroRefundReady) ? '' : 'disabled'}>退訂</button></div></article>`).join('') || '<div class="empty">目前沒有未退的訂金</div>'}</div></section>`;
     const batches = new Map();
     refunds.forEach((refund) => {
       if (!batches.has(refund.batch_id)) batches.set(refund.batch_id, { ...refund, orders: [], total: 0 });
@@ -118,7 +128,7 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
   function modal() {
     if (!selected) return '';
     const date = new Date().toLocaleDateString('sv-SE');
-    return `<div class="modal-backdrop"><div class="modal deposit-refund-modal"><div class="modal-head"><div><span class="eyebrow">REFUND DEPOSIT</span><h2>退訂・${esc(selected.recipient)}</h2><p>${selected.orders.length} 筆訂單・剩餘訂金 ${money(selected.total)}</p></div><button class="close" data-deposit-close type="button">×</button></div><div class="field"><label for="deposit-refund-amount">退訂金額（台幣／元）</label><input id="deposit-refund-amount" type="number" inputmode="numeric" min="1" max="${selected.total}" step="1" value="${selected.total}"/></div><div class="field"><label for="deposit-refund-date">退訂日期</label><input id="deposit-refund-date" type="date" value="${date}"/></div><div class="field"><label for="deposit-refund-source">我從哪退訂</label><input id="deposit-refund-source" placeholder="請輸入退款來源"/></div><div class="field"><label for="deposit-refund-account">退款帳戶（選填）</label><input id="deposit-refund-account" placeholder="銀行／帳號或其他資訊"/></div><div class="deposit-refund-actions"><button class="btn btn-light" data-deposit-close type="button">取消</button><button class="btn btn-primary" data-deposit-confirm type="button" ${busy ? 'disabled' : ''}>${busy ? '處理中…' : '確認退款'}</button></div></div></div>`;
+    return `<div class="modal-backdrop"><div class="modal deposit-refund-modal"><div class="modal-head"><div><span class="eyebrow">REFUND DEPOSIT</span><h2>退訂・${esc(selected.recipient)}</h2><p>${selected.orders.length} 筆訂單・剩餘訂金 ${money(selected.total)}${selected.total === 0 ? '（訂金已用完，本次不退回款項）' : ''}</p></div><button class="close" data-deposit-close type="button">×</button></div><div class="field"><label for="deposit-refund-amount">退訂金額（台幣／元）</label><input id="deposit-refund-amount" type="number" inputmode="numeric" min="${selected.total === 0 ? 0 : 1}" max="${selected.total}" step="1" value="${selected.total}"/></div><div class="field"><label for="deposit-refund-date">退訂日期</label><input id="deposit-refund-date" type="date" value="${date}"/></div><div class="field"><label for="deposit-refund-source">我從哪退訂</label><input id="deposit-refund-source" placeholder="請輸入退款來源"/></div><div class="field"><label for="deposit-refund-account">退款帳戶（選填）</label><input id="deposit-refund-account" placeholder="銀行／帳號或其他資訊"/></div><div class="deposit-refund-actions"><button class="btn btn-light" data-deposit-close type="button">取消</button><button class="btn btn-primary" data-deposit-confirm type="button" ${busy ? 'disabled' : ''}>${busy ? '處理中…' : '確認退款'}</button></div></div></div>`;
   }
 
   function close() { if (busy) return; selected = null; state.modal = null; render(); }
@@ -129,15 +139,15 @@ export function createDepositManagement({ state, supabase, esc, money, render, t
     const amount = Number(amountText), date = document.querySelector('#deposit-refund-date')?.value;
     const source = document.querySelector('#deposit-refund-source')?.value.trim();
     const account = document.querySelector('#deposit-refund-account')?.value.trim() || null;
-    if (!amountText || !Number.isSafeInteger(amount) || amount <= 0 || amount > selected.total) { toast('退訂金額須為 1 元以上，且不超過剩餘訂金'); return; }
+    if (!amountText || !Number.isSafeInteger(amount) || amount < (selected.total === 0 ? 0 : 1) || amount > selected.total) { toast(selected.total === 0 ? '訂金已用完，請填寫 0 元完成退款登記' : '退訂金額須為 1 元以上，且不超過剩餘訂金'); return; }
     if (!date || !source) { toast('請填寫退訂日期與退款來源'); return; }
     busy = true;
     const button = document.querySelector('[data-deposit-confirm]'); if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
-      const { error } = await supabase.rpc('admin_refund_order_deposits', { p_order_ids: selected.orders.map((order) => order.id), p_amount: amount, p_refund_date: date, p_refund_source: source, p_refund_account: account });
+      const { error } = await supabase.rpc(amount === 0 ? 'admin_refund_zero_order_deposits' : 'admin_refund_order_deposits', { p_order_ids: selected.orders.filter((order) => amount === 0 || order.amount > 0).map((order) => order.id), p_amount: amount, p_refund_date: date, p_refund_source: source, p_refund_account: account });
       if (error) throw error;
       await load(); selected = null; state.modal = null; view = 'refunded'; render(); toast('退款紀錄已儲存');
-    } catch (error) { toast(error.message || '退款失敗'); }
+    } catch (error) { toast(/admin_refund_zero_order_deposits|schema cache/i.test(error.message || '') ? '請先在 Supabase 執行 order_deposit_zero_refund_upgrade.sql' : /ZERO_REFUND_BALANCE_CHANGED/i.test(error.message || '') ? '剩餘訂金已變更，請重新整理後再試' : error.message || '退款失敗'); }
     finally { busy = false; if (button?.isConnected) { button.disabled = false; button.textContent = '確認退款'; } }
   }
 
