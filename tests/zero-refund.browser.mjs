@@ -1,0 +1,73 @@
+import {createRequire} from 'node:module';
+import {readFile,mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import assert from 'node:assert/strict';
+const {chromium}=createRequire(import.meta.url)('playwright');
+const source=await readFile(new URL('../deposit-management.js',import.meta.url),'utf8');
+const css=(await readFile(new URL('../styles.css',import.meta.url),'utf8')).replace(/^@import[^\r\n]+\r?\n/,'');
+const output=await mkdtemp(join(tmpdir(),'newshop-zero-refund-'));
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try {
+  for(const width of [1366,390,320]) {
+    const page=await browser.newPage({viewport:{width,height:900}});
+    page.setDefaultTimeout(10000);
+    const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.route('http://localhost/zero-refund',r=>r.fulfill({contentType:'text/html',body:`<meta charset="utf-8"><style>${css}</style><div id="fixture" style="padding:16px"></div>`}));
+    await page.goto('http://localhost/zero-refund');
+    await page.evaluate(async source=>{
+      const {createDepositManagement}=await import(URL.createObjectURL(new Blob([source],{type:'text/javascript'})));
+      const orders=[{id:'a',order_number:'FULL',recipient_name:'Mixed',phone:'',deposit_amount:500,deposit_deduction:500},{id:'b',order_number:'REMAINING',recipient_name:'Mixed',phone:'',deposit_amount:200,deposit_deduction:0},{id:'c',order_number:'ZERO',recipient_name:'Zero',phone:'',deposit_amount:800,deposit_deduction:800}];
+      const state={user:{id:'admin'},profile:{role:'owner'},depositReady:true,orders};
+      const positive=[],zeros=[],calls=[];let missing=false,controller;
+      const supabase={from:table=>({select:()=>({order:async()=>table==='order_deposit_zero_refunds'&&missing?{error:{message:'order_deposit_zero_refunds does not exist'}}:{data:structuredClone(table==='order_deposit_zero_refunds'?zeros:positive)}})}),rpc:async(name,args)=>{
+        calls.push({name,args});await new Promise(resolve=>setTimeout(resolve,50));
+        const batch=crypto.randomUUID();
+        for(const id of args.p_order_ids) {
+          const order=orders.find(o=>o.id===id);
+          const row={id:crypto.randomUUID(),batch_id:batch,order_id:id,order_number:order.order_number,recipient_name:order.recipient_name,phone:order.phone,amount:args.p_amount,refund_date:args.p_refund_date,refund_source:args.p_refund_source,refund_account:args.p_refund_account,created_at:new Date().toISOString()};
+          if(name==='admin_refund_zero_order_deposits') zeros.push({...row,amount:0,original_deposit:order.deposit_amount,deposit_deduction:order.deposit_deduction,previous_refunds:0});else positive.push(row);
+        }return {data:batch,error:null};
+      }};
+      const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+      const render=()=>{document.querySelector('#fixture').innerHTML=controller.panel()+controller.modal();controller.bind();};
+      controller=createDepositManagement({state,supabase,esc,money:v=>'NT$ '+v,render,toast:v=>window.lastToast=v,bindBackdropClose(){}});
+      await controller.load();render();window.zeroRefund={orders,state,controller,render,calls,zeros,setMissing:v=>missing=v};
+    },source);
+    await page.locator('[data-deposit-refund="zero|"]').click();
+    assert.equal(await page.locator('#deposit-refund-amount').getAttribute('min'),'0');
+    assert.equal(await page.locator('#deposit-refund-amount').inputValue(),'0');
+    await page.locator('#deposit-refund-amount').fill('1');
+    await page.locator('[data-deposit-confirm]').click();
+    assert.equal(await page.evaluate(()=>window.zeroRefund.calls.length),0);
+    await page.locator('#deposit-refund-amount').fill('0');
+    await page.locator('#deposit-refund-source').fill('全額折抵結清');
+    await page.screenshot({path:join(output,`form-${width}.png`)});
+    await page.locator('[data-deposit-confirm]').click();
+    await page.waitForFunction(()=>window.zeroRefund.state.modal===null);
+    assert.equal(await page.evaluate(()=>window.zeroRefund.calls[0].name),'admin_refund_zero_order_deposits');
+    assert.equal(await page.evaluate(()=>window.zeroRefund.calls[0].args.p_amount),0);
+    assert.match(await page.locator('.deposit-group--refunded').textContent(),/已退 NT\$ 0/);
+    await page.screenshot({path:join(output,`history-${width}.png`),fullPage:true});
+    await page.locator('[data-deposit-view="received"]').click();
+    assert.equal(await page.locator('[data-deposit-refund="zero|"]').count(),0);
+    await page.locator('[data-deposit-refund="mixed|"]').click();
+    assert.equal(await page.locator('#deposit-refund-amount').getAttribute('min'),'1');
+    await page.locator('#deposit-refund-amount').fill('100');
+    await page.locator('#deposit-refund-source').fill('銀行轉帳');
+    await page.locator('[data-deposit-confirm]').click();
+    await page.waitForFunction(()=>window.zeroRefund.calls.length===2&&window.zeroRefund.state.modal===null);
+    assert.deepEqual(await page.evaluate(()=>window.zeroRefund.calls[1].args.p_order_ids),['b'],'Positive refund skips fully redeemed orders');
+    await page.locator('[data-deposit-view="received"]').click();
+    await page.evaluate(async()=>{const f=window.zeroRefund;f.orders[2].deposit_deduction=700;await f.controller.load();f.render();});
+    assert.ok(await page.locator('[data-deposit-refund="zero|"]').isEnabled(),'A later deposit change reopens a remaining balance');
+    await page.evaluate(async()=>{const f=window.zeroRefund;f.orders.push({id:'d',order_number:'NEED-SQL',recipient_name:'Missing',phone:'',deposit_amount:100,deposit_deduction:100});f.setMissing(true);await f.controller.load();f.render();});
+    assert.ok(await page.locator('[data-deposit-refund="missing|"]').isDisabled());
+    assert.ok(await page.locator('[data-deposit-refund="mixed|"]').isEnabled());
+    assert.match(await page.locator('.setup-notice').textContent(),/order_deposit_zero_refund_upgrade.sql/);
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    assert.deepEqual(errors,[]);
+    console.log(`PASS ${width}px: zero refund form/history, consumed deposit closure, positive refund unchanged, balance reopening, migration fallback`);
+    await page.close();
+  }console.log('Screenshots: '+output);
+}finally{await browser.close();}

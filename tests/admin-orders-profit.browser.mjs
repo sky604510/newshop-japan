@@ -52,6 +52,27 @@ try {
     await page.evaluate(()=>window.orderHooks.render());
     assert.equal(await page.locator('.admin-content').evaluate(el=>el.scrollTop),900,'Rerender retains the current scroll position');
     await page.screenshot({path:join(output,`orders-scrolled-${width}.png`)});
+    if(width<=820) {
+      await page.locator('.admin-content').dispatchEvent('wheel',{deltaY:100});
+      await page.locator('.admin-content').evaluate(el=>el.scrollTop+=100);
+      await page.waitForFunction(()=>document.body.classList.contains('admin-menu-collapsed'));
+      assert.ok(await page.locator('.nav').isHidden());
+      assert.ok(await page.locator('.admin-tabs').isHidden());
+      assert.equal(await page.locator('[data-admin-menu-toggle]').getAttribute('aria-expanded'),'false');
+      const compact=await page.locator('.admin-content').boundingBox();
+      assert.ok(compact.y<100,'Collapsed navigation frees the top of the phone screen');
+      await page.screenshot({path:join(output,`compact-${width}.png`)});
+      await page.locator('[data-admin-menu-toggle]').click();
+      assert.ok(await page.locator('.admin-tabs').isVisible());
+      assert.ok(await page.locator('.nav').isVisible());
+      await page.screenshot({path:join(output,`expanded-${width}.png`)});
+      await page.locator('[data-admin-tab="orders"]').click();
+      assert.equal(await page.locator('[data-admin-menu-toggle]').getAttribute('aria-expanded'),'false','Choosing another tab closes the expanded menu');
+      await page.setViewportSize({width:1366,height:900});
+      assert.ok(await page.locator('.nav').isVisible());
+      assert.ok(await page.locator('.admin-tabs').isVisible());
+      await page.setViewportSize({width,height:900});
+    }
     await page.locator('[data-order-history="history"]').click();
     assert.deepEqual(await page.locator('.order-management-table tbody tr').evaluateAll(rows=>rows.map(row=>row.id)),['order-hw','order-ha2','order-ha1','order-hz']);
     await page.locator('[data-order-history="current"]').click();

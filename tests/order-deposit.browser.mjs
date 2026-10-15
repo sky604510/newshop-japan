@@ -23,7 +23,7 @@ try {
         { id: 'o2', order_number: 'NS-2', recipient_name: '同名', phone: '', delivery_method: '面交取貨', status: 'completed', deposit_amount: 300, total_amount: 500, order_items: [] },
       ];
       const refunds = []; window.dbCalls = [];
-      const createClient = () => ({ auth: { onAuthStateChange() {} }, from: (table) => ({ select: () => ({ order: async () => ({ data: structuredClone(table === 'order_deposit_refunds' ? refunds : records) }) }) }), rpc: async (name, args) => {
+      const createClient = () => ({ auth: { onAuthStateChange() {} }, from: (table) => ({ select: () => ({ order: async () => ({ data: structuredClone(table === 'order_deposit_refunds' ? refunds : table === 'order_deposit_zero_refunds' ? [] : records) }) }) }), rpc: async (name, args) => {
         window.dbCalls.push({ name, args });
         if (name !== 'admin_refund_order_deposits') return { error: { message: 'TEST_STOP' } };
         const batch = crypto.randomUUID(); let left = args.p_amount;
