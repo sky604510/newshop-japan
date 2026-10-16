@@ -15,13 +15,14 @@ async function checkRecipientCollapse(page, key, width, expectedAmount, expected
   assert.ok(await details.isVisible());
   await details.locator('[data-shipment-recipient-toggle]').click();
   assert.ok(await details.isHidden());assert.ok(await summary.isVisible());
-  assert.ok((await summary.textContent()).includes(`總金額 NT$ ${expectedAmount}`));
-  assert.ok((await summary.textContent()).includes(`獲利 NT$ ${expectedProfit}`));
+  assert.equal((await summary.locator('td').nth(3).textContent()).trim(),`NT$ ${expectedAmount}`);
+  assert.equal((await summary.locator('td').nth(4).textContent()).trim(),`NT$ ${expectedProfit}`);
+  assert.equal((await summary.locator('td').nth(2).textContent()).trim(),(await details.locator('td').nth(2).textContent()).trim());
   const bounds = await summary.evaluate(row=>{
-    const wrap=row.closest('.table-wrap').getBoundingClientRect(), button=row.querySelector('button').getBoundingClientRect();
-    return {right:button.right,wrapRight:wrap.right};
+    const headers=[...row.closest('table').querySelectorAll('thead th')];
+    return [...row.cells].map((cell,index)=>({left:cell.getBoundingClientRect().left,headerLeft:headers[index].getBoundingClientRect().left}));
   });
-  assert.ok(bounds.right<=bounds.wrapRight+1,'Collapsed recipient totals fit the visible mobile viewport');
+  assert.ok(bounds.every(cell=>Math.abs(cell.left-cell.headerLeft)<1),'Collapsed name, quantity, amount and profit align with the original columns');
   await page.evaluate(()=>window.testHooks.render());
   assert.ok(await summary.isVisible(),'Recipient stays collapsed across a rerender');
   await page.screenshot({path:join(output,`recipient-collapsed-${key.split(':')[0]}-${width}.png`)});
