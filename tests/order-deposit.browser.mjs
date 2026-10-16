@@ -176,7 +176,7 @@ try {
     assert.match(await page.locator('.shipment-deposit-info').textContent(), /測試訂金備註/);
     assert.match(await page.locator('.shipment-deposit-info').textContent(), /訂金抵扣 NT\$ 100/);
     assert.doesNotMatch(await page.locator('.shipment-table').textContent(), /內扣/);
-    assert.match(await page.locator('.shipment-table tbody tr').textContent(), /NT\$ 900/);
+    assert.match(await page.locator('.shipment-table tbody tr[data-shipment-recipient-details]').textContent(), /NT\$ 900/);
     const splitStages = await page.evaluate(() => {
       const { state, shipmentSummaries } = window.testHooks;
       state.orders[0].deposit_amount = 400;

@@ -9,6 +9,25 @@ const source = (await readFile(new URL('../app.js', import.meta.url), 'utf8')).r
 const xlsx = await readFile(new URL('../assets/xlsx-style.bundle.js', import.meta.url), 'utf8');
 const css = (await readFile(new URL('../styles.css', import.meta.url), 'utf8')).replace(/^@import[^\r\n]+\r?\n/, '');
 const output = await mkdtemp(join(tmpdir(), 'newshop-reconciliation-'));
+async function checkRecipientCollapse(page, key, width, expectedAmount, expectedProfit) {
+  const details = page.locator(`[data-shipment-recipient-details="${key}"]`);
+  const summary = page.locator(`[data-shipment-recipient-summary="${key}"]`);
+  assert.ok(await details.isVisible());
+  await details.locator('[data-shipment-recipient-toggle]').click();
+  assert.ok(await details.isHidden());assert.ok(await summary.isVisible());
+  assert.ok((await summary.textContent()).includes(`總金額 NT$ ${expectedAmount}`));
+  assert.ok((await summary.textContent()).includes(`獲利 NT$ ${expectedProfit}`));
+  const bounds = await summary.evaluate(row=>{
+    const wrap=row.closest('.table-wrap').getBoundingClientRect(), button=row.querySelector('button').getBoundingClientRect();
+    return {right:button.right,wrapRight:wrap.right};
+  });
+  assert.ok(bounds.right<=bounds.wrapRight+1,'Collapsed recipient totals fit the visible mobile viewport');
+  await page.evaluate(()=>window.testHooks.render());
+  assert.ok(await summary.isVisible(),'Recipient stays collapsed across a rerender');
+  await page.screenshot({path:join(output,`recipient-collapsed-${key.split(':')[0]}-${width}.png`)});
+  await summary.locator('button').focus();await summary.locator('button').press('Enter');
+  assert.ok(await details.isVisible());assert.ok(await summary.isHidden());
+}
 async function checkSnapshot(page, selector, title, included, excluded, filename) {
   await page.evaluate(() => {
     window.snapshotDrawn = [];
@@ -91,6 +110,8 @@ try {
     assert.ok(await button.isDisabled());
     await page.locator('[data-shipment-select="itemA"]').check();
     await page.locator('[data-shipment-select="itemB"]').check();
+    await checkRecipientCollapse(page,'pending::A',width,200,100);
+    assert.ok(await page.locator('[data-shipment-select="itemA"]').isChecked(),'Collapse does not clear selected products');
     assert.equal(await button.textContent(), '發貨（2）');
     await page.locator('[data-shipment-select="itemB"]').uncheck();
     assert.equal(await button.textContent(), '發貨（1）');
@@ -114,7 +135,8 @@ try {
     await page.locator('[data-shipment-view="shipped"]').click();
     assert.equal(await button.count(), 0);
     assert.equal(await page.locator('[data-restore-shipment]').count(), 2);
-    assert.equal(await page.locator('.shipment-recipient-check strong').first().evaluate(el=>getComputedStyle(el).fontSize),'17px');
+    await checkRecipientCollapse(page,'shipped::A',width,200,100);
+    assert.equal(await page.locator('.shipment-recipient-check strong').first().evaluate(el=>getComputedStyle(el).fontSize),'28px');
     assert.equal(await page.locator('.shipment-snapshot').first().evaluate(el=>getComputedStyle(el).fontSize),'14px');
     assert.ok((await page.locator('.shipment-snapshot').first().boundingBox()).height>=38);
     assert.match(await page.locator('.shipment-table').evaluate(el=>getComputedStyle(el).borderSpacing),/14px/);
@@ -126,6 +148,7 @@ try {
     await page.waitForFunction(()=>document.querySelector('[data-complete-recipient="A"]')===null);
     await page.locator('[data-shipment-view="awaiting"]').click();
     assert.equal(await page.locator('[data-reconcile-select]').count(),2);
+    await checkRecipientCollapse(page,'awaiting::A',width,200,100);
     await checkSnapshot(page,'[data-shipment-snapshot="A"]','對帳單（待收款）',['商品A'],['商品B','商品D'],`snapshot-awaiting-${width}.png`);
     assert.ok(await page.locator('[data-reconcile-selected]').isDisabled());
     await page.locator('[data-reconcile-select="A"]').check();
@@ -168,6 +191,7 @@ try {
     await page.locator('[data-shipment-view="completed"]').click();
     assert.equal(await page.locator('[data-unreconcile-recipient="A"]').count(),1);
     assert.equal(await page.locator('[data-reconciliation-group]').count(),1);
+    await checkRecipientCollapse(page,'completed:batch-0001:A',width,200,100);
     const groupToggle = page.locator('[data-group-collapse="reconciliation:batch-0001"]');
     await groupToggle.click();
     assert.ok(await page.locator('[data-unreconcile-recipient="A"]').isHidden());
@@ -215,6 +239,9 @@ try {
       await loadFulfillmentChecks(); render();
     });
     assert.equal(await page.locator('[data-reconciliation-group]').count(),2,'Same recipient in two batches remains in separate groups');
+    await page.locator('[data-shipment-recipient-details="completed:second-batch:E"] [data-shipment-recipient-toggle]').click();
+    assert.ok(await page.locator('[data-shipment-recipient-details="completed:batch-0001:D"]').isVisible(),'Same recipient in another group is not collapsed');
+    await page.locator('[data-shipment-recipient-summary="completed:second-batch:E"] button').click();
     await checkSnapshot(page,'[data-reconciliation-group="second-batch"] [data-shipment-snapshot]','對帳單（已完成）',['另一批商品'],['商品D','商品A'],`snapshot-completed-${width}.png`);
     await checkSnapshot(page,'[data-reconciliation-group="batch-0001"] [data-shipment-snapshot]','對帳單（已完成）',['商品D'],['另一批商品','商品A'],`snapshot-first-batch-${width}.png`);
     page.once('dialog',dialog=>dialog.accept());
