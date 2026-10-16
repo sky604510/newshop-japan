@@ -66,7 +66,7 @@ try {
     });
     await page.evaluate((appSource) => {
       const records = [{order_item_id:'itemD',shipped_at:'2026-10-01',completed_at:'2026-10-02',reconciled_at:null}]; window.shipCalls = [];
-      const createClient = () => ({ auth: { onAuthStateChange() {} }, from: () => ({ select: async (columns) => window.oldBatchSchema && columns.includes('reconciliation_batch_id') ? { error: { message: 'column reconciliation_batch_id does not exist' } } : { data: structuredClone(records) } }), rpc: async (name, args) => {
+      const createClient = () => ({ auth: { onAuthStateChange() {} }, from: () => ({ select: (columns) => { let ids = null; const query = { in(_key, value) { ids = value; return query; }, then(resolve) { resolve(window.oldBatchSchema && columns.includes('reconciliation_batch_id') ? { error: { message: 'column reconciliation_batch_id does not exist' } } : { data: structuredClone(ids ? records.filter(row => ids.includes(row.order_item_id)) : records) }); } }; return query; } }), rpc: async (name, args) => {
         window.shipCalls.push({ name, args });
         await new Promise((resolve) => setTimeout(resolve, 100));
         if (name === 'admin_rename_shipment_group') {
