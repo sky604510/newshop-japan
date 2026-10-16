@@ -48,6 +48,28 @@ try {
       render();
     });
     assert.deepEqual(await page.locator('.order-management-table tbody tr').evaluateAll(rows=>rows.slice(0,4).map(row=>row.id)),['order-new-amy','order-a3','order-a2','order-a1'],'A newly received order brings its earlier same-name orders to the top');
+    if(width<=820) {
+      const table=page.locator('.order-management-table');
+      const originalWidth=await table.evaluate(el=>el.getBoundingClientRect().width);
+      await page.locator('[data-order-zoom="0"]').click();
+      const fit=await table.evaluate(el=>{
+        const wrap=el.closest('.order-table-wrap'),style=getComputedStyle(wrap),rect=wrap.getBoundingClientRect(),tableRect=el.getBoundingClientRect();
+        return {left:tableRect.left,right:tableRect.right,limit:rect.left+wrap.clientLeft+wrap.clientWidth-parseFloat(style.paddingRight),overflow:wrap.scrollWidth-wrap.clientWidth};
+      });
+      assert.ok(fit.right<=fit.limit+1,'All seven columns fit in the mobile viewport');
+      assert.ok(fit.overflow<=1,'Fit mode has no horizontal overflow');
+      await page.screenshot({path:join(output,'orders-fit-'+width+'.png')});
+      await page.locator('#order-table-zoom').fill('50');
+      const middleWidth=await table.evaluate(el=>el.getBoundingClientRect().width);
+      assert.ok(middleWidth<originalWidth&&middleWidth>fit.right-fit.left,'Slider supports intermediate magnification');
+      await page.evaluate(()=>window.orderHooks.render());
+      assert.equal(await page.locator('#order-table-zoom').inputValue(),'50','Zoom retained across rerenders');
+      await page.locator('[data-order-zoom="100"]').click();
+      assert.ok(Math.abs(await table.evaluate(el=>el.getBoundingClientRect().width)-originalWidth)<1,'Maximum matches original size');
+      const colors=await page.evaluate(()=>({toolbar:getComputedStyle(document.querySelector('.admin-mobile-toolbar')).backgroundColor,active:getComputedStyle(document.querySelector('.admin-tabs button.active')).backgroundColor,text:getComputedStyle(document.querySelector('.admin-mobile-toolbar strong')).color}));
+      assert.equal(colors.toolbar,colors.active,'Mobile toolbar matches desktop selected-tab background');
+      assert.equal(colors.text,'rgb(255, 255, 255)');
+    } else assert.ok(await page.locator('.order-zoom-controls').isHidden());
     const before=await page.locator('.admin-tabs').boundingBox();
     await page.locator('.admin-content').evaluate(el=>el.scrollTop=900);
     assert.ok(await page.locator('.admin-content').evaluate(el=>el.scrollTop>0));
