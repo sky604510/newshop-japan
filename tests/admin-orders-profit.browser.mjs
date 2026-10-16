@@ -11,7 +11,7 @@ const output=await mkdtemp(join(tmpdir(),'newshop-admin-orders-'));
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try {
   for(const width of [1366,390,320]) {
-    const page=await browser.newPage({viewport:{width,height:900}});
+    const page=await browser.newPage({viewport:{width,height:900},hasTouch:width<=820});
     page.setDefaultTimeout(10000);
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.route('http://localhost/admin-test',r=>r.fulfill({contentType:'text/html',body:`<meta charset="utf-8"><style>${css}</style><div id="app"></div>`}));
@@ -48,28 +48,55 @@ try {
       render();
     });
     assert.deepEqual(await page.locator('.order-management-table tbody tr').evaluateAll(rows=>rows.slice(0,4).map(row=>row.id)),['order-new-amy','order-a3','order-a2','order-a1'],'A newly received order brings its earlier same-name orders to the top');
+    assert.equal(await page.locator('.order-zoom-controls, #order-table-zoom').count(),0,'No slider or zoom controls');
     if(width<=820) {
       const table=page.locator('.order-management-table');
       const originalWidth=await table.evaluate(el=>el.getBoundingClientRect().width);
-      await page.locator('[data-order-zoom="0"]').click();
+      const session=await page.context().newCDPSession(page);
+      async function pinch(from,to) {
+        await page.evaluate(()=>{
+          const content=document.querySelector('.admin-content'),table=document.querySelector('.order-management-table');
+          content.scrollTop+=table.getBoundingClientRect().top-content.getBoundingClientRect().top-20;
+        });
+        const center=await table.evaluate(el=>{
+          const wrap=el.closest('.order-table-wrap').getBoundingClientRect(),content=el.closest('.admin-content').getBoundingClientRect();
+          return {x:wrap.left+wrap.width/2,y:Math.min(content.bottom-35,Math.max(content.top+60,el.getBoundingClientRect().top+60))};
+        });
+        const touches=distance=>[{x:center.x-distance/2,y:center.y,id:1},{x:center.x+distance/2,y:center.y,id:2}];
+        await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:touches(from)});
+        for(let i=1;i<=5;i++)await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:touches(from+(to-from)*i/5)});
+        await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      }
+      await pinch(220,8);
       const fit=await table.evaluate(el=>{
         const wrap=el.closest('.order-table-wrap'),style=getComputedStyle(wrap),rect=wrap.getBoundingClientRect(),tableRect=el.getBoundingClientRect();
         return {left:tableRect.left,right:tableRect.right,limit:rect.left+wrap.clientLeft+wrap.clientWidth-parseFloat(style.paddingRight),overflow:wrap.scrollWidth-wrap.clientWidth};
       });
-      assert.ok(fit.right<=fit.limit+1,'All seven columns fit in the mobile viewport');
+      assert.ok(fit.right<=fit.limit+1,'Pinch inward fits all seven columns');
       assert.ok(fit.overflow<=1,'Fit mode has no horizontal overflow');
-      await page.screenshot({path:join(output,'orders-fit-'+width+'.png')});
-      await page.locator('#order-table-zoom').fill('50');
+      assert.equal(await page.evaluate(()=>visualViewport.scale),1,'Pinch scales only table, not browser page');
+      await page.screenshot({path:join(output,'orders-pinch-fit-'+width+'.png')});
+      await pinch(8,220);
+      assert.ok(Math.abs(await table.evaluate(el=>el.getBoundingClientRect().width)-originalWidth)<1,'Pinch outward capped at original size');
+      await pinch(220,140);
       const middleWidth=await table.evaluate(el=>el.getBoundingClientRect().width);
-      assert.ok(middleWidth<originalWidth&&middleWidth>fit.right-fit.left,'Slider supports intermediate magnification');
+      assert.ok(middleWidth<originalWidth&&middleWidth>fit.right-fit.left,'Pinch supports intermediate magnification');
       await page.evaluate(()=>window.orderHooks.render());
-      assert.equal(await page.locator('#order-table-zoom').inputValue(),'50','Zoom retained across rerenders');
-      await page.locator('[data-order-zoom="100"]').click();
-      assert.ok(Math.abs(await table.evaluate(el=>el.getBoundingClientRect().width)-originalWidth)<1,'Maximum matches original size');
+      assert.ok(Math.abs(await table.evaluate(el=>el.getBoundingClientRect().width)-middleWidth)<1,'Zoom retained across rerenders');
+      await pinch(8,220);
+      await page.waitForTimeout(650);
+      const box=await page.locator('.admin-content').boundingBox();
+      const scrollBefore=await page.locator('.admin-content').evaluate(el=>el.scrollTop);
+      await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:width/2,y:box.y+box.height-35,id:1}]});
+      for(let i=1;i<=5;i++)await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:width/2,y:box.y+box.height-35-i*16,id:1}]});
+      await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      await page.waitForTimeout(250);
+      assert.ok(await page.locator('.admin-content').evaluate(el=>el.scrollTop)>scrollBefore,'Single finger still scrolls the orders');
+      await session.detach();
+      await page.evaluate(()=>{window.orderHooks.state.adminMenuCollapsed=false;window.orderHooks.render();document.querySelector('.admin-content').scrollTop=0;});
       const colors=await page.evaluate(()=>({toolbar:getComputedStyle(document.querySelector('.admin-mobile-toolbar')).backgroundColor,active:getComputedStyle(document.querySelector('.admin-tabs button.active')).backgroundColor,text:getComputedStyle(document.querySelector('.admin-mobile-toolbar strong')).color}));
-      assert.equal(colors.toolbar,colors.active,'Mobile toolbar matches desktop selected-tab background');
-      assert.equal(colors.text,'rgb(255, 255, 255)');
-    } else assert.ok(await page.locator('.order-zoom-controls').isHidden());
+      assert.equal(colors.toolbar,colors.active);assert.equal(colors.text,'rgb(255, 255, 255)');
+    }
     const before=await page.locator('.admin-tabs').boundingBox();
     await page.locator('.admin-content').evaluate(el=>el.scrollTop=900);
     assert.ok(await page.locator('.admin-content').evaluate(el=>el.scrollTop>0));
