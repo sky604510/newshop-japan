@@ -33,14 +33,21 @@ try {
     },{source,moduleSource});
     const originalIds=await page.evaluate(()=>window.orderHooks.state.orders.map(o=>o.id));
     const ids=await page.locator('.order-management-table tbody tr').evaluateAll(rows=>rows.map(row=>row.id));
-    assert.deepEqual(ids.slice(2,6),['order-a3','order-a2','order-a1','order-b1']);
-    assert.deepEqual(ids.slice(0,2),['order-w1','order-w2']);
+    assert.deepEqual(ids.slice(26,30),['order-b1','order-a3','order-a2','order-a1']);
+    assert.deepEqual(ids.slice(30),['order-w1','order-w2']);
+    assert.equal(ids[0],'order-z-11','The newest recipient group appears first');
     assert.equal(ids.filter(id=>id.startsWith('order-z')).length,26);
     assert.deepEqual(await page.evaluate(()=>window.orderHooks.state.orders.map(o=>o.id)),originalIds,'Display sorting must not mutate load order');
     await page.locator('[data-action="export"]').click();
     await page.waitForFunction(()=>Array.isArray(window.exportedRows));
-    const exported=await page.evaluate(()=>window.exportedRows.slice(3,8).map(row=>row.訂單編號));
+    const exported=await page.evaluate(()=>window.exportedRows.filter(row=>row.收件人.trim()==='Amy').map(row=>row.訂單編號));
     assert.deepEqual(exported,['NS-a3','NS-ha2','NS-a2','NS-a1','NS-ha1']);
+    await page.evaluate(()=>{
+      const {state,render}=window.orderHooks;
+      state.orders.push({...state.orders.find(order=>order.id==='a1'),id:'new-amy',order_number:'NS-NEW-AMY',created_at:'2026-10-16T12:00:00Z'});
+      render();
+    });
+    assert.deepEqual(await page.locator('.order-management-table tbody tr').evaluateAll(rows=>rows.slice(0,4).map(row=>row.id)),['order-new-amy','order-a3','order-a2','order-a1'],'A newly received order brings its earlier same-name orders to the top');
     const before=await page.locator('.admin-tabs').boundingBox();
     await page.locator('.admin-content').evaluate(el=>el.scrollTop=900);
     assert.ok(await page.locator('.admin-content').evaluate(el=>el.scrollTop>0));

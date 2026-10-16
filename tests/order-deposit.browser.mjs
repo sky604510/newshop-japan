@@ -152,23 +152,30 @@ try {
       const { state, shipmentSummaries, statementSnapshotCanvas } = window.testHooks;
       state.orders[0].deposit_deduction = 100;
       state.orders[0].deposit_note = '測試訂金備註';
+      state.orders[0].note = '內部訂單備註不顯示';
       state.fulfillmentChecks.set('item1', { shipped_at: '2026-10-01', completed_at: null });
       const recipient = shipmentSummaries('shipped')[0];
       const drawn = [];
       const original = CanvasRenderingContext2D.prototype.fillText;
       CanvasRenderingContext2D.prototype.fillText = function (text, ...args) { drawn.push(String(text)); return original.call(this, text, ...args); };
-      try { await statementSnapshotCanvas(recipient); }
+      try { const { canvas } = await statementSnapshotCanvas(recipient); window.snapshotImage = canvas.toDataURL(); }
       finally { CanvasRenderingContext2D.prototype.fillText = original; }
       return { amount: recipient.amount, deduction: recipient.deduction, profit: recipient.profit, drawn };
     });
     assert.equal(snapshot.amount, 900);
     assert.equal(snapshot.deduction, 100);
     assert.equal(snapshot.profit, 700, 'Deposit redemption does not reduce profit');
-    assert.ok(snapshot.drawn.some((line) => line.includes('測試訂金備註')));
+    assert.ok(snapshot.drawn.every((line) => !/備註|內扣/.test(line)), 'Snapshot excludes all notes and uses the clear deposit-redemption label');
+    assert.ok(snapshot.drawn.includes('商品金額 NT$ 1,000－訂金抵扣 NT$ 100＝總金額 NT$ 900'));
+    await page.locator('#app').evaluate(el=>{const image=document.createElement('img');image.src=window.snapshotImage;image.style.width='100%';el.replaceChildren(image);});
+    await page.screenshot({path:join(output,`snapshot-${width}.png`),fullPage:true});
+    await page.evaluate(()=>window.testHooks.render());
     assert.ok(snapshot.drawn.some((line) => line.includes('總金額 NT$ 900')));
     assert.ok(snapshot.drawn.every((line) => !/NS-1|NS-2/.test(line)), 'Snapshot must not display order numbers');
     await page.evaluate(() => { window.testHooks.state.adminTab = 'shipments'; window.testHooks.state.shipmentView = 'shipped'; window.testHooks.render(); });
     assert.match(await page.locator('.shipment-deposit-info').textContent(), /測試訂金備註/);
+    assert.match(await page.locator('.shipment-deposit-info').textContent(), /訂金抵扣 NT\$ 100/);
+    assert.doesNotMatch(await page.locator('.shipment-table').textContent(), /內扣/);
     assert.match(await page.locator('.shipment-table tbody tr').textContent(), /NT\$ 900/);
     const splitStages = await page.evaluate(() => {
       const { state, shipmentSummaries } = window.testHooks;

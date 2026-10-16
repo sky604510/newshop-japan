@@ -1,6 +1,7 @@
 -- NewShop：管理員將訂單中的整筆品項移到新訂單。
 -- 在 Supabase SQL Editor 執行一次；需先有 admin_operations_upgrade.sql。
 -- 不新增或刪除商品品項、不異動庫存；品項 ID 與採購／發貨紀錄保持不變。
+-- 訂單備註只留在原訂單，新訂單備註為空白；不回溯修改既有訂單。
 
 create or replace function public.admin_split_order_items(
   p_order_id uuid,
@@ -43,7 +44,7 @@ begin
   ) values (
     source_order.user_id, source_order.account_email, source_order.customer_id,
     source_order.recipient_name, source_order.phone, source_order.delivery_method,
-    source_order.note, source_order.status, 0
+    '', source_order.status, 0
   ) returning id, order_number into new_order_id, new_order_number;
 
   update public.order_items

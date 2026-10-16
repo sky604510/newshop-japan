@@ -9,6 +9,27 @@ const source = (await readFile(new URL('../app.js', import.meta.url), 'utf8')).r
 const xlsx = await readFile(new URL('../assets/xlsx-style.bundle.js', import.meta.url), 'utf8');
 const css = (await readFile(new URL('../styles.css', import.meta.url), 'utf8')).replace(/^@import[^\r\n]+\r?\n/, '');
 const output = await mkdtemp(join(tmpdir(), 'newshop-reconciliation-'));
+async function checkSnapshot(page, selector, title, included, excluded, filename) {
+  await page.evaluate(() => {
+    window.snapshotDrawn = [];
+    if (!window.originalSnapshotFillText) {
+      window.originalSnapshotFillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { window.snapshotDrawn.push(String(text)); return window.originalSnapshotFillText.call(this,text,...args); };
+    }
+  });
+  await page.locator(selector).click();
+  const dialog = page.locator('.statement-snapshot-dialog');await dialog.waitFor();
+  assert.match(await dialog.locator('.statement-snapshot-actions strong').textContent(),new RegExp(title));
+  const drawn = await page.evaluate(()=>window.snapshotDrawn);
+  assert.ok(drawn.includes(title));
+  for (const name of included) assert.ok(drawn.includes(name),`Snapshot includes ${name}`);
+  for (const name of excluded) assert.ok(!drawn.includes(name),`Snapshot excludes ${name}`);
+  assert.ok(drawn.every(text=>!/NS-|備註/.test(text)));
+  assert.ok((await dialog.locator('a[download]').getAttribute('download')).includes(title));
+  await dialog.screenshot({path:join(output,filename)});
+  await dialog.locator('[data-close-statement-snapshot]').click();
+  assert.equal(await dialog.count(),0);
+}
 try {
   for (const width of [1366, 390]) {
     const page = await browser.newPage({ viewport: { width, height: 844 } });
@@ -93,6 +114,11 @@ try {
     await page.locator('[data-shipment-view="shipped"]').click();
     assert.equal(await button.count(), 0);
     assert.equal(await page.locator('[data-restore-shipment]').count(), 2);
+    assert.equal(await page.locator('.shipment-recipient-check strong').first().evaluate(el=>getComputedStyle(el).fontSize),'17px');
+    assert.equal(await page.locator('.shipment-snapshot').first().evaluate(el=>getComputedStyle(el).fontSize),'14px');
+    assert.ok((await page.locator('.shipment-snapshot').first().boundingBox()).height>=38);
+    assert.match(await page.locator('.shipment-table').evaluate(el=>getComputedStyle(el).borderSpacing),/14px/);
+    await page.screenshot({path:join(output,`recipient-spacing-${width}.png`),fullPage:true});
     await page.locator('[data-complete-recipient="A"]').check();
     assert.match(await page.locator('[data-complete-selected]').textContent(),/待收款/);
     page.once('dialog',dialog=>dialog.accept());
@@ -100,6 +126,7 @@ try {
     await page.waitForFunction(()=>document.querySelector('[data-complete-recipient="A"]')===null);
     await page.locator('[data-shipment-view="awaiting"]').click();
     assert.equal(await page.locator('[data-reconcile-select]').count(),2);
+    await checkSnapshot(page,'[data-shipment-snapshot="A"]','對帳單（待收款）',['商品A'],['商品B','商品D'],`snapshot-awaiting-${width}.png`);
     assert.ok(await page.locator('[data-reconcile-selected]').isDisabled());
     await page.locator('[data-reconcile-select="A"]').check();
     await page.locator('[data-reconcile-select="D"]').check();
@@ -141,6 +168,14 @@ try {
     await page.locator('[data-shipment-view="completed"]').click();
     assert.equal(await page.locator('[data-unreconcile-recipient="A"]').count(),1);
     assert.equal(await page.locator('[data-reconciliation-group]').count(),1);
+    const groupToggle = page.locator('[data-group-collapse="reconciliation:batch-0001"]');
+    await groupToggle.click();
+    assert.ok(await page.locator('[data-unreconcile-recipient="A"]').isHidden());
+    assert.ok(await page.locator('.reconciliation-group-head').isVisible());
+    await page.evaluate(()=>window.testHooks.render());
+    assert.equal(await groupToggle.getAttribute('aria-expanded'),'false');
+    await groupToggle.click();
+    assert.ok(await page.locator('[data-unreconcile-recipient="A"]').isVisible());
     assert.match(await page.locator('.reconciliation-group-head').textContent(),/總金額 NT\$ 300/);
     assert.match(await page.locator('.reconciliation-group-head').textContent(),/總獲利 NT\$ 150/);
     await page.locator('[data-action="export-shipment"]').click();
@@ -180,6 +215,8 @@ try {
       await loadFulfillmentChecks(); render();
     });
     assert.equal(await page.locator('[data-reconciliation-group]').count(),2,'Same recipient in two batches remains in separate groups');
+    await checkSnapshot(page,'[data-reconciliation-group="second-batch"] [data-shipment-snapshot]','對帳單（已完成）',['另一批商品'],['商品D','商品A'],`snapshot-completed-${width}.png`);
+    await checkSnapshot(page,'[data-reconciliation-group="batch-0001"] [data-shipment-snapshot]','對帳單（已完成）',['商品D'],['另一批商品','商品A'],`snapshot-first-batch-${width}.png`);
     page.once('dialog',dialog=>dialog.accept());
     await page.locator('[data-unreconcile-recipient="D"]').click();
     await page.waitForFunction(()=>!document.querySelector('[data-unreconcile-recipient="D"]'));

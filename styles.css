@@ -319,6 +319,13 @@ body.modal-open .pwa-install { display:none; }
 .summary-card { border:1px solid var(--ink); border-radius:18px; overflow:hidden; background:white; }
 .summary-head { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; color:white; background:var(--ink); }
 .summary-head h3 { margin:0; }
+.summary-head h3,.reconciliation-group-name h3 { display:flex; align-items:center; gap:8px; min-width:0; }
+.group-disclosure { flex:none; display:grid; place-items:center; width:30px; height:30px; padding:6px; border:0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; }
+.group-disclosure::before { content:''; width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:7px solid currentColor; transform:rotate(90deg); }
+.group-disclosure[aria-expanded="false"]::before { transform:none; }
+.group-disclosure:hover { background:rgba(150,125,140,.2); }
+.group-disclosure:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
+[data-group-body][hidden] { display:none !important; }
 .summary-head span { color:var(--ink); background:var(--petal); border-radius:999px; padding:4px 9px; font-size:12px; font-weight:800; }
 .summary-grid { grid-template-columns:1fr; }
 .procurement-table .profit { color:#16845b; font-weight:800; }
@@ -334,7 +341,13 @@ body.modal-open .pwa-install { display:none; }
 .shipment-table td:first-child small { display:block; color:var(--muted); margin-top:4px; }
 .shipment-recipient-check { display:flex; align-items:center; gap:8px; cursor:pointer; }
 .shipment-recipient-check input { width:18px; height:18px; margin:0; accent-color:var(--rose-deep); cursor:pointer; }
-.shipment-snapshot { display:block; margin-top:7px; padding:6px 12px; font-size:11px; }
+.shipment-table tbody > tr > td:first-child > strong,.shipment-recipient-check > strong { font-size:17px; font-weight:800; line-height:1.5; }
+.shipment-snapshot { display:block; margin-top:9px; padding:9px 16px; min-height:38px; font-size:14px; font-weight:700; }
+.shipment-table { border-collapse:separate; border-spacing:0 14px; }
+.shipment-table tbody > tr > td { border-top:2px solid #e5c4d2; border-bottom:1px solid var(--line); padding-top:20px; padding-bottom:20px; background:#fffdfd; }
+.shipment-table tbody > tr > td:first-child { border-left:1px solid var(--line); border-radius:12px 0 0 12px; }
+.shipment-table tbody > tr > td:last-child { border-right:1px solid var(--line); border-radius:0 12px 12px 0; }
+.shipment-table tbody > tr:nth-child(even) > td { background:#fff8fb; }
 .shipment-bulk-actions { display:flex; justify-content:flex-end; margin:-4px 0 14px; }
 .shipment-uncomplete { margin-top:10px; white-space:nowrap; }
 .shipment-recipient-notes { display:grid; gap:8px; min-width:190px; margin-top:10px; }

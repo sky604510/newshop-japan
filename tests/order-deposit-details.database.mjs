@@ -13,11 +13,12 @@ try {
     create table public.orders (
       id uuid primary key default gen_random_uuid(), order_number text not null default gen_random_uuid()::text,
       recipient_name text not null, phone text default '', total_amount numeric not null default 0,
+      user_id uuid, account_email text, customer_id uuid, delivery_method text, note text default '', status text default 'confirmed',
       updated_at timestamptz default now()
     );
     create table public.order_items (
       id uuid primary key default gen_random_uuid(), order_id uuid not null references public.orders(id),
-      unit_price numeric not null, quantity integer not null
+      unit_price numeric not null, quantity integer not null, subtotal numeric generated always as (unit_price * quantity) stored
     );
     create function public.place_order(text,text,text,text,jsonb) returns uuid language plpgsql as $$
     declare result uuid; entry record;
@@ -43,18 +44,10 @@ try {
       update public.orders set total_amount=(select sum(unit_price*quantity) from public.order_items where order_id=$1) where id=$1;
       return $1;
     end; $$;
-    create function public.admin_split_order_items(uuid,uuid[]) returns text language plpgsql as $$
-    declare new_id uuid; result text;
-    begin
-      if not public.is_admin() then raise exception 'ADMIN_REQUIRED'; end if;
-      insert into public.orders(recipient_name,phone) select recipient_name,phone from public.orders where id=$1 returning id,order_number into new_id,result;
-      update public.order_items set order_id=new_id where order_id=$1 and id=any($2);
-      update public.orders set total_amount=(select coalesce(sum(unit_price*quantity),0) from public.order_items where order_id=$1) where id=$1;
-      update public.orders set total_amount=(select coalesce(sum(unit_price*quantity),0) from public.order_items where order_id=new_id) where id=new_id;
-      return result;
-    end; $$;
   `);
   await db.exec(await readFile(new URL('../supabase/order_deposit_upgrade.sql', import.meta.url),'utf8'));
+  const splitMigration = await readFile(new URL('../supabase/order_split_upgrade.sql', import.meta.url),'utf8');
+  await db.exec(splitMigration); await db.exec(splitMigration);
   const migration = await readFile(new URL('../supabase/order_deposit_details_upgrade.sql', import.meta.url),'utf8');
   await db.exec(migration); await db.exec(migration);
   const place = (items, deposit, note, deduction) => db.query('select public.place_order_with_deposit_details($1,$2,$3,$4,$5::jsonb,$6,$7,$8) as id',['同名','','面交取貨','',JSON.stringify(items),deposit,note,deduction]);
@@ -70,9 +63,13 @@ try {
   assert.equal(Number((await read()).total_amount),1250);
   assert.equal((await read()).deposit_note,'後台更新');
   const secondItem = (await db.query('select id from public.order_items where order_id=$1 and unit_price=500',[orderId])).rows[0].id;
+  await db.query('update public.orders set note=$2 where id=$1',[orderId,'原訂單專用備註']);
   const newNumber = (await db.query('select public.admin_split_order_with_deposit_details($1,$2::uuid[]) as n',[orderId,[secondItem]])).rows[0].n;
   assert.equal(Number((await read()).total_amount),750);
   assert.equal(Number((await read()).deposit_deduction),250);
+  assert.equal((await db.query('select note from public.orders where id=$1',[orderId])).rows[0].note,'原訂單專用備註');
+  const splitOrder = (await db.query('select note,deposit_amount,deposit_note,deposit_deduction from public.orders where order_number=$1',[newNumber])).rows[0];
+  assert.equal(splitOrder.note,'');assert.equal(Number(splitOrder.deposit_amount),0);assert.equal(splitOrder.deposit_note,'');assert.equal(Number(splitOrder.deposit_deduction),0);
   assert.equal(Number((await db.query('select total_amount from public.orders where order_number=$1',[newNumber])).rows[0].total_amount),500);
   await db.query('select public.admin_refund_order_deposits($1::uuid[],$2,$3::date,$4,$5)',[[orderId],1750,'2026-10-01','我',null]);
   await assert.rejects(db.query('select public.admin_refund_order_deposits($1::uuid[],$2,$3::date,$4,$5)',[[orderId],1,'2026-10-01','我',null]),/REFUND_EXCEEDS_DEPOSIT/);
